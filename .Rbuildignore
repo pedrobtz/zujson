@@ -1,0 +1,10 @@
+^zujson\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^\.github$
+^CLAUDE\.md$
+^\.agents$
+^design-zujson\.md$
+^src/.*\.o$
+^src/.*\.o\.tmp$
+^src/.*\.(so|dll)$

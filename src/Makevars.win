@@ -1,0 +1,18 @@
+# No optimisation or warning flags here: CRAN sets those, and overriding them
+# is a policy violation.
+#
+# yyjson is vendored unmodified and compiled with its own defaults. Nothing is
+# disabled: UTF-8 validation and the reader's number parsing are exactly what
+# make it safe to point at an untrusted HTTP response body.
+PKG_CPPFLAGS = -I. -Ivendor/yyjson
+
+# Listed explicitly rather than via $(wildcard ...): R only auto-compiles
+# src/*.c, yyjson lives in a subdirectory, and a GNU make wildcard would
+# force SystemRequirements: GNU make. Add new sources here.
+OBJECTS = \
+  init.o \
+  zu_cond.o \
+  zu_parse.o \
+  zu_write.o \
+  zu_info.o \
+  vendor/yyjson/yyjson.o

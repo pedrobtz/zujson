@@ -7,7 +7,7 @@
 zujson_info()
 }
 \value{
-A named list.
+A named list with \code{zujson}, \code{yyjson} and \code{max_depth}.
 }
 \description{
 Returns the package version, the version of the vendored yyjson sources it

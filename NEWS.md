@@ -12,6 +12,10 @@ First release.
 * `json_validate()` reports whether input parses, without building a result.
 * `zujson_info()` reports the package version, the vendored yyjson version and
   the nesting limit.
-* Every failure raises a condition inheriting from `zujson_error`.
+* Every failure raises a condition inheriting from `zujson_error`:
+  `zujson_parse_error`, `zujson_write_error`, `zujson_unsupported_type`,
+  `zujson_depth_error`, `zujson_io_error` and `zujson_arg_error`.
+* A leading UTF-8 byte order mark is ignored rather than rejected, and a
+  `POSIXlt` is refused rather than serialized as its 11 internal fields.
 * yyjson 0.12.0 is vendored under `src/vendor/yyjson`; no system library is
   needed.

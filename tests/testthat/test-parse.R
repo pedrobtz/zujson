@@ -127,3 +127,41 @@ test_that("bad arguments are rejected before reaching C", {
   expect_error(json_parse_raw("[]"), class = "zujson_arg_error")
   expect_error(json_parse_file(tempfile()), class = "zujson_arg_error")
 })
+
+test_that("a NUL an R string cannot hold is a structured error, not a bare one", {
+  # The six-character escape is legal JSON but decodes to a byte no R string
+  # can contain. Left to the R internals this raises a bare simpleError, which
+  # would escape the zujson_error contract every caller handles on.
+  esc <- paste0("\\", "u0000")
+  expect_error(json_parse(paste0('["a', esc, 'b"]')),
+               class = "zujson_parse_error")
+  expect_error(json_parse(paste0('{"a', esc, 'b": 1}')),
+               class = "zujson_parse_error")
+  expect_error(json_parse(paste0('{"k": "a', esc, 'b"}')),
+               class = "zujson_error")
+})
+
+test_that("a leading UTF-8 BOM is ignored rather than rejected", {
+  # RFC 8259 forbids emitting one but allows ignoring it, and real APIs emit
+  # them; failing a response body over three bytes would help nobody.
+  bom <- as.raw(c(0xef, 0xbb, 0xbf))
+  expect_identical(json_parse(c(bom, charToRaw("[1, 2]"))), 1:2)
+  expect_identical(json_parse(c(bom, charToRaw('{"a": 1}'))), list(a = 1L))
+  expect_true(json_validate(c(bom, charToRaw("[]"))))
+})
+
+test_that("an unreadable file is an io error, not a parse error", {
+  # "could not open it" and "it is not JSON" have different fixes
+  dir <- withr::local_tempdir()
+  expect_error(json_parse_file(dir), class = "zujson_io_error")
+})
+
+test_that("json_parse_file expands a tilde path", {
+  # file.exists() expands ~ and fopen() does not, so without expansion a
+  # perfectly readable file reports itself as unreadable
+  name <- paste0("zujson-test-", Sys.getpid(), ".json")
+  path <- file.path(path.expand("~"), name)
+  withr::defer(unlink(path))
+  writeLines('{"a": 1}', path)
+  expect_identical(json_parse_file(file.path("~", name)), list(a = 1L))
+})

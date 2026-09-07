@@ -59,13 +59,19 @@ static yyjson_mut_val *zu_w_int(zu_wctx *ctx, int v) {
 
 /* Whole doubles are written without a decimal point. R has no integer literal
  * -- `1` is a double -- and yyjson's real writer would emit `1.0`, which a
- * schema expecting an integer will reject. The 2^53 bound is where a double
- * stops representing consecutive integers exactly. */
-#define ZU_DBL_INT_MAX 9007199254740992.0
+ * schema expecting an integer will reject.
+ *
+ * The bound is int64's range, not 2^53. A double that is already a whole
+ * number *is* exactly that integer, whatever its magnitude, so converting is
+ * lossless; 2^53 is where consecutive integers stop being representable, which
+ * is a different question and the wrong test here. Written as `>= min` and
+ * `< max` because 2^63 itself is not representable as an int64. */
+#define ZU_DBL_INT_MIN (-9223372036854775808.0)   /* -2^63, exact          */
+#define ZU_DBL_INT_MAX 9223372036854775808.0      /*  2^63, exclusive      */
 
 static yyjson_mut_val *zu_w_dbl(zu_wctx *ctx, double v) {
     if (!R_FINITE(v)) return zu_ok(yyjson_mut_null(ctx->doc));
-    if (v == floor(v) && v >= -ZU_DBL_INT_MAX && v <= ZU_DBL_INT_MAX)
+    if (v == floor(v) && v >= ZU_DBL_INT_MIN && v < ZU_DBL_INT_MAX)
         return zu_ok(yyjson_mut_sint(ctx->doc, (int64_t) v));
     return zu_ok(yyjson_mut_real(ctx->doc, v));
 }
@@ -211,7 +217,12 @@ static int zu_fully_named(SEXP nms, R_xlen_t n) {
 static void zu_obj_add(yyjson_mut_val *obj, SEXP nms, R_xlen_t i,
                        yyjson_mut_val *val, zu_wctx *ctx) {
     yyjson_mut_val *key = zu_w_str(ctx, STRING_ELT(nms, i));
-    yyjson_mut_obj_add(obj, key, val);
+    /* Silently dropping a key/value pair would be the worst possible failure
+     * mode for a request body, so the one way this can fail is checked even
+     * though zu_fully_named() should already have made it impossible. */
+    if (!yyjson_mut_obj_add(obj, key, val))
+        zu_stop("zujson_write_error", "could not add key '%s' to a JSON object",
+                Rf_translateCharUTF8(STRING_ELT(nms, i)));
 }
 
 /* ---- data frames --------------------------------------------------------- */
@@ -219,14 +230,21 @@ static void zu_obj_add(yyjson_mut_val *obj, SEXP nms, R_xlen_t i,
 /* Row oriented, because that is what an HTTP API means by a table. The
  * column-oriented reading is still available by dropping the class first. */
 static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
-    zu_check_depth(depth);
+    /* A data frame is the one value that emits *two* container levels at once:
+     * the array of rows at `depth`, and each row object at `depth + 1`. Both
+     * have to be charged, or json_write() can emit JSON that json_parse()
+     * then rejects as too deep. */
+    zu_check_depth(depth + 1);
     R_xlen_t ncol = XLENGTH(df);
     SEXP nms = Rf_getAttrib(df, R_NamesSymbol);
     if (!zu_fully_named(nms, ncol))
         zu_stop("zujson_unsupported_type",
                 "data frame columns must all be named");
 
-    R_xlen_t nrow = ncol > 0 ? XLENGTH(VECTOR_ELT(df, 0)) : 0;
+    /* With no columns there is no column to measure, but the rows still exist:
+     * df[, 0] is n rows of nothing, which is n empty objects. */
+    R_xlen_t nrow = ncol > 0 ? XLENGTH(VECTOR_ELT(df, 0))
+                             : XLENGTH(Rf_getAttrib(df, R_RowNamesSymbol));
 
     /* Resolve each column's kind once rather than per cell. */
     zu_atom *kinds = (zu_atom *) R_alloc((size_t) (ncol > 0 ? ncol : 1),
@@ -252,9 +270,11 @@ static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
     for (R_xlen_t i = 0; i < nrow; i++) {
         yyjson_mut_val *row = zu_ok(yyjson_mut_obj(ctx->doc));
         for (R_xlen_t j = 0; j < ncol; j++) {
+            /* depth + 2: the cell sits inside the row object, which sits
+             * inside the array of rows. */
             yyjson_mut_val *v = zu_w_elt(VECTOR_ELT(df, j), kinds[j],
                                          VECTOR_ELT(levels_holder, j),
-                                         i, ctx, depth + 1);
+                                         i, ctx, depth + 2);
             zu_obj_add(row, nms, j, v, ctx);
         }
         yyjson_mut_arr_add_val(arr, row);
@@ -274,6 +294,13 @@ static yyjson_mut_val *zu_from_sexp(SEXP x, zu_wctx *ctx, int depth) {
     /* I() marks a length-1 vector that must stay an array. It is checked
      * before the class dispatch because I() prepends to the class vector. */
     int as_is = Rf_inherits(x, "AsIs");
+
+    /* POSIXlt is a list of 11 broken-down time fields, so without this it
+     * would serialize as {"sec":...,"min":...,"gmtoff":...} -- valid JSON, and
+     * never what anyone meant by sending a timestamp. */
+    if (Rf_inherits(x, "POSIXlt"))
+        zu_stop("zujson_unsupported_type",
+                "cannot serialize a POSIXlt; convert it with as.POSIXct() first");
 
     if (Rf_inherits(x, "data.frame")) return zu_w_df(x, ctx, depth);
 

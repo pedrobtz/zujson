@@ -34,6 +34,16 @@
 #' 1000 levels is rejected with a `zujson_depth_error`, which is what makes the
 #' parser safe to point at an untrusted response body.
 #'
+#' A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
+#' forbids emitting one but allows ignoring it, and real APIs emit them.
+#'
+#' Two things that are valid JSON still cannot become R values, and both raise
+#' `zujson_parse_error` rather than a bare error: a string or key containing an
+#' escaped NUL (`\u0000`), which no R string can hold, and one longer than
+#' `.Machine$integer.max` bytes. `json_parse_file()` additionally raises
+#' `zujson_io_error` when the file cannot be read at all, which is a different
+#' problem from its contents not being JSON.
+#'
 #' @param x For `json_parse()`, a single string of JSON text or a raw vector of
 #'   UTF-8 JSON bytes. For `json_parse_raw()`, a raw vector.
 #' @param path Path to a file containing JSON.
@@ -87,6 +97,10 @@ json_parse_raw <- function(x, simplify = TRUE) {
 #' unlink(path)
 json_parse_file <- function(path, simplify = TRUE) {
   path <- zu_check_string(path, "path")
+  # Expand here rather than let the C fopen() see a literal "~": file.exists()
+  # expands it and fopen() does not, so without this a readable file reports
+  # itself as unreadable.
+  path <- path.expand(path)
   if (!file.exists(path)) {
     zu_abort("zujson_arg_error", paste0("File '", path, "' does not exist."))
   }
@@ -99,6 +113,13 @@ json_parse_file <- function(path, simplify = TRUE) {
 #' and without raising a condition. Use it to decide whether a response body is
 #' worth parsing; use [json_parse()] when a failure should be an error you can
 #' read.
+#'
+#' This answers "is this valid JSON", which is very nearly but not exactly "will
+#' [json_parse()] succeed". The one input where they differ is a string or key
+#' containing an escaped NUL (`\u0000`): that is valid JSON, so this returns
+#' `TRUE`, but no R string can hold the result, so `json_parse()` raises
+#' `zujson_parse_error`. Code that must not fail should handle the condition
+#' from `json_parse()` rather than pre-screening with this.
 #'
 #' @param x A single string of JSON text, or a raw vector of JSON bytes.
 #' @return `TRUE` or `FALSE`.

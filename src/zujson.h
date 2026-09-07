@@ -41,6 +41,6 @@ SEXP zujson_validate_str(SEXP x_);                     /* zu_parse.c */
 SEXP zujson_validate_raw(SEXP x_);                     /* zu_parse.c */
 SEXP zujson_write(SEXP x_, SEXP pretty_,               /* zu_write.c */
                   SEXP auto_unbox_, SEXP as_raw_);
-SEXP zujson_yyjson_version(void);                      /* zu_info.c  */
+SEXP zujson_build_info(void);                          /* zu_info.c  */
 
 #endif /* ZUJSON_H */

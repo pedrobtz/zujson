@@ -8,7 +8,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"zujson_validate_str",   (DL_FUNC) &zujson_validate_str,   1},
     {"zujson_validate_raw",   (DL_FUNC) &zujson_validate_raw,   1},
     {"zujson_write",          (DL_FUNC) &zujson_write,          4},
-    {"zujson_yyjson_version", (DL_FUNC) &zujson_yyjson_version, 0},
+    {"zujson_build_info",     (DL_FUNC) &zujson_build_info,     0},
     {NULL, NULL, 0}
 };
 

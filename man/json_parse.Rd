@@ -57,6 +57,16 @@ than becoming \code{c("1", "a")}, so a value's type survives the round trip. Set
 Arrays of objects are \emph{not} turned into data frames. Nesting deeper than
 1000 levels is rejected with a \code{zujson_depth_error}, which is what makes the
 parser safe to point at an untrusted response body.
+
+A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
+forbids emitting one but allows ignoring it, and real APIs emit them.
+
+Two things that are valid JSON still cannot become R values, and both raise
+\code{zujson_parse_error} rather than a bare error: a string or key containing an
+escaped NUL (\verb{\\u0000}), which no R string can hold, and one longer than
+\code{.Machine$integer.max} bytes. \code{json_parse_file()} additionally raises
+\code{zujson_io_error} when the file cannot be read at all, which is a different
+problem from its contents not being JSON.
 }
 
 \examples{

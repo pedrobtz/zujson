@@ -36,13 +36,18 @@
 #' what its `tzone` says, since it is the same instant either way, and
 #' sub-second parts are dropped.
 #'
-#' Doubles are written with the shortest representation that reads back
-#' identically, so `0.1` is `0.1` rather than `0.10000000000000001`.
+#' Doubles are written compactly and always read back as the same number, so
+#' `0.1` is `0.1` rather than `0.10000000000000001`. A double that is a whole
+#' number is written without a decimal point at all — R has no integer literal,
+#' so `1` is a double, and `1.0` is rejected by a schema expecting an integer.
 #'
-#' Complex vectors, raw vectors, functions and environments have no sensible
-#' JSON form and raise a `zujson_unsupported_type` error rather than being
-#' guessed at. A vector carrying an unrecognised class is written as its
-#' underlying type.
+#' Complex vectors, raw vectors, functions, environments and `POSIXlt` have no
+#' sensible JSON form and raise a `zujson_unsupported_type` error rather than
+#' being guessed at. (`POSIXlt` is a list of 11 broken-down time fields; convert
+#' it with `as.POSIXct()` first.) A vector carrying an unrecognised class is
+#' written as its underlying type, which for a matrix means its values in
+#' column-major order with `dim` dropped — matrices are not turned into nested
+#' arrays in this version.
 #'
 #' @param x The R object to serialize.
 #' @param pretty Whether to indent the output. `FALSE` (the default) writes the

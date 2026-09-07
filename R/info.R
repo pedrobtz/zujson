@@ -4,15 +4,14 @@
 #' was compiled against, and the nesting depth limit the parser and serializer
 #' both enforce.
 #'
-#' @return A named list.
+#' @return A named list with `zujson`, `yyjson` and `max_depth`.
 #' @export
 #'
 #' @examples
 #' zujson_info()
 zujson_info <- function() {
-  list(
-    zujson = as.character(utils::packageVersion("zujson")),
-    yyjson = .Call(C_zujson_yyjson_version),
-    max_depth = 1000L
-  )
+  # yyjson and max_depth come from the compiled object rather than being
+  # restated here, so there is only ever one copy of either.
+  c(list(zujson = as.character(utils::packageVersion("zujson"))),
+    .Call(C_zujson_build_info))
 }

@@ -21,6 +21,16 @@ test_that("json_validate agrees with json_parse", {
   }
 })
 
+test_that("validity and parseability diverge only on a NUL escape", {
+  # the escape is valid JSON, so json_validate() is right to say TRUE, and an R
+  # string cannot hold the result, so json_parse() is right to fail. This is
+  # the only input where the two disagree, and ?json_validate says so.
+  esc <- paste0("\\", "u0000")
+  js <- paste0('["a', esc, 'b"]')
+  expect_true(json_validate(js))
+  expect_error(json_parse(js), class = "zujson_parse_error")
+})
+
 test_that("bad arguments are rejected", {
   expect_error(json_validate(1), class = "zujson_arg_error")
   expect_error(json_validate(list()), class = "zujson_arg_error")

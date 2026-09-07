@@ -2,15 +2,21 @@
 # a whole request/response cycle does not have to enumerate the failure modes.
 
 test_that("every zujson condition inherits from zujson_error", {
+  bad_utf8 <- rawToChar(as.raw(c(0x61, 0xff, 0x62)))
+  Encoding(bad_utf8) <- "UTF-8"
+  # one entry per class the package can raise; the names are the classes, so a
+  # class that stops being reachable fails here rather than rotting silently
   throwers <- list(
-    parse = function() json_parse("{"),
-    depth = function() json_parse(nested_json(zujson_info()$max_depth + 1L)),
-    unsupported = function() json_write(as.raw(1)),
-    arg = function() json_parse(1)
+    zujson_parse_error       = function() json_parse("{"),
+    zujson_depth_error       = function() json_parse(nested_json(zujson_info()$max_depth + 1L)),
+    zujson_unsupported_type  = function() json_write(as.raw(1)),
+    zujson_write_error       = function() json_write(bad_utf8),
+    zujson_io_error          = function() json_parse_file(withr::local_tempdir()),
+    zujson_arg_error         = function() json_parse(1)
   )
   for (nm in names(throwers)) {
-    expect_error(throwers[[nm]](), class = "zujson_error",
-                 info = paste("thrower:", nm))
+    expect_error(throwers[[nm]](), class = nm, info = nm)
+    expect_error(throwers[[nm]](), class = "zujson_error", info = nm)
   }
 })
 

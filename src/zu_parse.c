@@ -1,4 +1,5 @@
 #include <limits.h>
+#include <string.h>
 #include "zujson.h"
 
 /* ---------------------------------------------------------------------------
@@ -103,20 +104,34 @@ static double zu_as_dbl(yyjson_val *v) {
     }
 }
 
-/* yyjson guarantees valid UTF-8 (validation is on), so the encoding mark is
- * accurate and R will not re-encode the bytes.
+/* The one place a CHARSXP is made, so every string and every object key gets
+ * the same two guards.
  *
- * The length guard matters because mkCharLenCE takes an int: a string past
- * INT_MAX would arrive as a negative length and be read off the end. R cannot
- * hold such a string anyway, so refusing is the only option. */
-static SEXP zu_as_char(yyjson_val *v) {
-    if (yyjson_is_null(v)) return NA_STRING;
-    size_t len = yyjson_get_len(v);
+ * yyjson guarantees valid UTF-8 (validation is on), so the CE_UTF8 mark is
+ * accurate and R will not re-encode the bytes. What it does not guarantee is
+ * that R can hold the result:
+ *
+ *  - mkCharLenCE takes an int, so a string past INT_MAX would arrive as a
+ *    negative length and be read off the end;
+ *  - "\u0000" is perfectly legal JSON but decodes to a NUL, and an R string
+ *    cannot contain one. Left to mkCharLenCE this raises a bare simpleError
+ *    from the R internals, which would escape the zujson_error contract that
+ *    callers handle on. */
+static SEXP zu_mkchar(const char *dat, size_t len, const char *what) {
     if (len > (size_t) INT_MAX)
         zu_stop("zujson_parse_error",
-                "JSON contains a string of %lu bytes, too long for R",
-                (unsigned long) len);
-    return Rf_mkCharLenCE(yyjson_get_str(v), (int) len, CE_UTF8);
+                "JSON contains %s of %lu bytes, too long for R",
+                what, (unsigned long) len);
+    if (memchr(dat, '\0', len) != NULL)
+        zu_stop("zujson_parse_error",
+                "JSON contains %s with an embedded NUL (\\u0000), "
+                "which an R string cannot hold", what);
+    return Rf_mkCharLenCE(dat, (int) len, CE_UTF8);
+}
+
+static SEXP zu_as_char(yyjson_val *v) {
+    if (yyjson_is_null(v)) return NA_STRING;
+    return zu_mkchar(yyjson_get_str(v), yyjson_get_len(v), "a string");
 }
 
 /* Building a large tree is the slow half of parsing, so it has to be
@@ -187,8 +202,8 @@ static SEXP zu_obj(yyjson_val *obj, int simplify, int depth) {
     R_xlen_t i = 0;
     while ((key = yyjson_obj_iter_next(&iter)) != NULL) {
         SET_STRING_ELT(nms, i,
-                       Rf_mkCharLenCE(yyjson_get_str(key),
-                                      (int) yyjson_get_len(key), CE_UTF8));
+                       zu_mkchar(yyjson_get_str(key), yyjson_get_len(key),
+                                 "an object key"));
         SET_VECTOR_ELT(out, i,
                        zu_to_sexp(yyjson_obj_iter_get_val(key), simplify, depth + 1));
         i++;
@@ -252,11 +267,20 @@ static SEXP zu_finish(yyjson_doc *doc, int simplify) {
     return out;
 }
 
+/* One flag set for every read path, so json_parse() and json_validate() can
+ * never disagree about what counts as parseable.
+ *
+ * BOM: RFC 8259 forbids emitting one but allows ignoring it, and real APIs do
+ * emit them. Rejecting a response body over three leading bytes would be a
+ * pointless failure for the use case this package exists to serve. */
+#define ZUJSON_READ_FLAGS (YYJSON_READ_ALLOW_BOM)
+
 static SEXP zu_read_mem(const char *dat, size_t len, int simplify) {
     yyjson_read_err err;
     /* No YYJSON_READ_INSITU: yyjson copies into its own buffer, so R's
      * immutable CHAR()/RAW() data is never written through. */
-    yyjson_doc *doc = yyjson_read_opts((char *) dat, len, 0, NULL, &err);
+    yyjson_doc *doc = yyjson_read_opts((char *) dat, len,
+                                       ZUJSON_READ_FLAGS, NULL, &err);
     if (!doc)
         zu_stop("zujson_parse_error", "invalid JSON at byte %lu: %s",
                 (unsigned long) err.pos, err.msg);
@@ -281,10 +305,16 @@ SEXP zujson_parse_raw(SEXP x_, SEXP simplify_) {
 SEXP zujson_parse_file(SEXP path_, SEXP simplify_) {
     const char *path = Rf_translateCharUTF8(STRING_ELT(path_, 0));
     yyjson_read_err err;
-    yyjson_doc *doc = yyjson_read_file(path, 0, NULL, &err);
-    if (!doc)
+    yyjson_doc *doc = yyjson_read_file(path, ZUJSON_READ_FLAGS, NULL, &err);
+    if (!doc) {
+        /* "could not open it" and "its contents are not JSON" are different
+         * problems with different fixes, so they get different classes. */
+        if (err.code == YYJSON_READ_ERROR_FILE_OPEN ||
+            err.code == YYJSON_READ_ERROR_FILE_READ)
+            zu_stop("zujson_io_error", "could not read '%s': %s", path, err.msg);
         zu_stop("zujson_parse_error", "invalid JSON in '%s' at byte %lu: %s",
                 path, (unsigned long) err.pos, err.msg);
+    }
     return zu_finish(doc, Rf_asLogical(simplify_));
 }
 
@@ -292,7 +322,8 @@ SEXP zujson_parse_file(SEXP path_, SEXP simplify_) {
  * "check only" mode, and building nothing in R is most of the saving anyway. */
 static SEXP zu_validate_mem(const char *dat, size_t len) {
     yyjson_read_err err;
-    yyjson_doc *doc = yyjson_read_opts((char *) dat, len, 0, NULL, &err);
+    yyjson_doc *doc = yyjson_read_opts((char *) dat, len,
+                                       ZUJSON_READ_FLAGS, NULL, &err);
     if (!doc) return Rf_ScalarLogical(FALSE);
     yyjson_doc_free(doc);
     return Rf_ScalarLogical(TRUE);

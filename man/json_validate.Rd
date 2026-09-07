@@ -18,6 +18,14 @@ and without raising a condition. Use it to decide whether a response body is
 worth parsing; use \code{\link[=json_parse]{json_parse()}} when a failure should be an error you can
 read.
 }
+\details{
+This answers "is this valid JSON", which is very nearly but not exactly "will
+\code{\link[=json_parse]{json_parse()}} succeed". The one input where they differ is a string or key
+containing an escaped NUL (\verb{\\u0000}): that is valid JSON, so this returns
+\code{TRUE}, but no R string can hold the result, so \code{json_parse()} raises
+\code{zujson_parse_error}. Code that must not fail should handle the condition
+from \code{json_parse()} rather than pre-screening with this.
+}
 \examples{
 json_validate('{"a": 1}')
 json_validate('{"a": }')

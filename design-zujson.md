@@ -138,6 +138,28 @@ These were the questions left open in the earlier `jsx3` notes. v1's answers:
    lists.
 8. **Objects** — always a named list, no exceptions.
 
+### Valid JSON that R cannot hold
+
+Three documents are valid JSON and still cannot become R values: a string or
+key containing `\u0000` (no R string holds a NUL), one longer than `INT_MAX`
+bytes, and anything nested past the depth cap. All three raise
+`zujson_parse_error`, because a caller handling `zujson_error` must not be
+surprised by a bare `simpleError` from the R internals — which is exactly what
+`Rf_mkCharLenCE` raises if a NUL reaches it. Both guards live in `zu_mkchar()`,
+the single place a CHARSXP is made, so string values and object keys cannot
+drift apart.
+
+This makes `json_validate()` and `json_parse()` disagree on precisely one
+input. The NUL escape is valid JSON, so `json_validate()` says `TRUE`, and
+`json_parse()` still fails; both answers are right for the questions they are
+asked. `?json_validate` documents the divergence and points callers who must
+not fail at handling the condition rather than pre-screening.
+
+A leading UTF-8 BOM is **ignored**, via one shared flag set (`ZUJSON_READ_FLAGS`)
+used by every read path so parse and validate cannot drift apart. RFC 8259
+forbids emitting one but allows ignoring it, and real APIs emit them; failing a
+response body over three leading bytes would serve nobody.
+
 ## 6. R to JSON
 
 Two rules carry most of the mapping:
@@ -161,7 +183,8 @@ Two rules carry most of the mapping:
 | `data.frame` | array of one object per row |
 | `list()` | `[]` |
 | `structure(list(), names=character())` | `{}` |
-| complex, raw, closure, environment | `zujson_unsupported_type` |
+| `matrix` | flat array, column-major, `dim` dropped |
+| complex, raw, closure, environment, `POSIXlt` | `zujson_unsupported_type` |
 
 ### Decisions worth recording
 
@@ -180,7 +203,11 @@ creates on the way back (a JSON object always parses to a named *list*).
 
 **Whole doubles lose their decimal point.** R has no integer literal, so `1` is
 a double, and yyjson's real writer emits `1.0`. A schema expecting an integer
-rejects that. Doubles that are whole and within ±2^53 are written as integers.
+rejects that. Any double that is a whole number within int64's range is written
+as an integer. The bound is int64, not 2^53: a double that is *already* a whole
+number is exactly that integer whatever its magnitude, so the conversion is
+lossless; 2^53 is where consecutive integers stop being representable, which is
+a different question and the wrong test here.
 
 **Data frames are row-oriented.** That is what an HTTP API means by a table.
 The column-oriented reading remains available as `json_write(as.list(df))`.
@@ -195,6 +222,16 @@ JSON for a closure or an environment, so those raise. A vector carrying a class
 `zujson` has never heard of is written as its underlying type, because a new S3
 class should not be a hard failure.
 
+`POSIXlt` is the exception that proves the rule, and it raises. It is a *list*
+of 11 broken-down time fields, so the permissive path would emit
+`{"sec":0,"min":0,...,"gmtoff":0}` — valid JSON, and never what anyone meant by
+sending a timestamp. Falling through to the underlying type is only defensible
+when the underlying type still carries the value; here it does not.
+
+A matrix does fall through, to its values in column-major order with `dim`
+dropped. That is out of scope per §5 question 5 rather than an oversight, and
+it is documented and tested rather than left to be discovered.
+
 ## 7. Error model
 
 Every failure raises a condition of class
@@ -208,7 +245,8 @@ so a caller wrapping a whole request/response cycle handles `zujson_error` once.
 | class | raised when |
 | --- | --- |
 | `zujson_parse_error` | input is not valid JSON (message names the byte offset) |
-| `zujson_write_error` | serialization failed, or output exceeds a single R string |
+| `zujson_write_error` | serialization failed (e.g. a string that is not the UTF-8 it claims to be), or output exceeds a single R string |
+| `zujson_io_error` | `json_parse_file()` could not read the file at all |
 | `zujson_unsupported_type` | an R type or shape with no JSON form |
 | `zujson_depth_error` | nesting beyond `ZUJSON_MAX_DEPTH` |
 | `zujson_arg_error` | an argument failed its check before reaching C |
@@ -247,6 +285,11 @@ real API sends, far below what the smallest supported stack survives.
 scalar inside it is not a level of its own, so the limit means the same thing
 when parsing and when writing. Getting this wrong in the obvious way (checking
 on entry to every value) makes the two directions disagree by one.
+
+A data frame is the one value that emits **two** container levels at once — the
+array of rows, and each row object — so it is charged for both. Charging it one
+lets `json_write()` emit JSON that `json_parse()` then rejects, which is the
+worst kind of bug this package can have: output it will not read back.
 
 ## 10. Layout and naming
 

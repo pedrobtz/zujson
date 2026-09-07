@@ -171,3 +171,65 @@ test_that("bad arguments are rejected before reaching C", {
   expect_error(json_write_raw(1L, pretty = c(TRUE, TRUE)),
                class = "zujson_arg_error")
 })
+
+test_that("whole doubles lose the decimal point across the whole int64 range", {
+  # a double that is already a whole number IS that integer, whatever its
+  # magnitude, so the conversion is lossless well past 2^53
+  expect_json(1e15, "1000000000000000")
+  expect_json(1e16, "10000000000000000")
+  expect_json(1e18, "1000000000000000000")
+  expect_json(2^53 + 2, "9007199254740994")
+  expect_json(-1e16, "-10000000000000000")
+  # past int64 there is no integer form, so the real writer takes over
+  expect_match(json_write(1e300), "e", fixed = TRUE)
+  # and every one of them still reads back as the same number
+  for (v in c(1e15, 1e16, 1e18, 2^53 + 2, -1e16, 1e300)) {
+    expect_identical(as.numeric(json_parse(json_write(v))), v)
+  }
+})
+
+test_that("POSIXlt is refused rather than emitted as its internal fields", {
+  # without this it serializes as {"sec":..,"min":..,"gmtoff":..}, which is
+  # valid JSON and never what anyone meant by sending a timestamp
+  expect_error(json_write(as.POSIXlt("2026-09-07", tz = "UTC")),
+               class = "zujson_unsupported_type")
+  expect_error(json_write(list(at = as.POSIXlt("2026-09-07", tz = "UTC"))),
+               class = "zujson_unsupported_type")
+  # the message says what to do about it
+  cnd <- tryCatch(json_write(as.POSIXlt("2026-09-07", tz = "UTC")),
+                  zujson_error = function(e) e)
+  expect_match(conditionMessage(cnd), "as.POSIXct")
+})
+
+test_that("a matrix is flattened column-major and loses its dim", {
+  # documented rather than supported: matrix simplification is out of scope for
+  # v1, and this pins what actually happens so it cannot change unnoticed
+  expect_json(matrix(1:6, nrow = 2), "[1,2,3,4,5,6]")
+  expect_json(matrix(1:6, nrow = 2, byrow = TRUE), "[1,4,2,5,3,6]")
+})
+
+test_that("a data frame with no columns keeps its rows", {
+  # df[, 0] is n rows of nothing, which is n empty objects -- not no rows
+  expect_json(data.frame(a = 1:3)[, 0, drop = FALSE], "[{},{},{}]")
+  expect_json(data.frame(a = integer())[, 0, drop = FALSE], "[]")
+})
+
+test_that("a data frame is charged for both container levels it emits", {
+  # it writes an array of row objects, so json_write() must not emit JSON that
+  # json_parse() would then reject as too deep
+  limit <- zujson_info()$max_depth
+  nest <- function(n) Reduce(function(acc, i) list(acc), seq_len(n),
+                             data.frame(a = 1))
+  ok <- json_write(nest(limit - 2L))
+  expect_no_error(json_parse(ok))
+  expect_error(json_write(nest(limit - 1L)), class = "zujson_depth_error")
+})
+
+test_that("a string that is not the UTF-8 it claims to be is a write error", {
+  # reachable from ordinary input, so the class has to be part of the contract
+  bad <- rawToChar(as.raw(c(0x61, 0xff, 0x62)))
+  Encoding(bad) <- "UTF-8"
+  expect_error(json_write(bad), class = "zujson_write_error")
+  expect_error(json_write(list(a = bad)), class = "zujson_write_error")
+  expect_error(json_write_raw(bad), class = "zujson_error")
+})

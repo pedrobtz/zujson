@@ -62,13 +62,18 @@ Every kind of missing value becomes \code{null}: JSON has no \code{NA}, and \cod
 what its \code{tzone} says, since it is the same instant either way, and
 sub-second parts are dropped.
 
-Doubles are written with the shortest representation that reads back
-identically, so \code{0.1} is \code{0.1} rather than \code{0.10000000000000001}.
+Doubles are written compactly and always read back as the same number, so
+\code{0.1} is \code{0.1} rather than \code{0.10000000000000001}. A double that is a whole
+number is written without a decimal point at all — R has no integer literal,
+so \code{1} is a double, and \code{1.0} is rejected by a schema expecting an integer.
 
-Complex vectors, raw vectors, functions and environments have no sensible
-JSON form and raise a \code{zujson_unsupported_type} error rather than being
-guessed at. A vector carrying an unrecognised class is written as its
-underlying type.
+Complex vectors, raw vectors, functions, environments and \code{POSIXlt} have no
+sensible JSON form and raise a \code{zujson_unsupported_type} error rather than
+being guessed at. (\code{POSIXlt} is a list of 11 broken-down time fields; convert
+it with \code{as.POSIXct()} first.) A vector carrying an unrecognised class is
+written as its underlying type, which for a matrix means its values in
+column-major order with \code{dim} dropped — matrices are not turned into nested
+arrays in this version.
 }
 
 \examples{

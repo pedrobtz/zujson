@@ -19,7 +19,7 @@ pak::pak("pedrobtz/zujson")
 
 ## Usage
 
-Six functions, and that is the whole package.
+Nine functions, and that is the whole package.
 
 ```r
 library(zujson)
@@ -46,7 +46,16 @@ json_parse(response_bytes)          # raw vector in, R object out
 json_write_raw(list(q = "cats"))    # R object in, UTF-8 bytes out
 ```
 
-The rest: `json_parse_raw()`, `json_parse_file()` and `json_validate()`.
+NDJSON (`application/x-ndjson`) is one JSON value per line — the shape of log
+tails, change feeds and bulk uploads:
+
+```r
+json_parse_ndjson(body)                       # -> list, one element per record
+json_write_ndjson(data.frame(id = 1:2))       # -> one object per row
+```
+
+The rest: `json_parse_raw()`, `json_parse_file()`, `json_validate()` and
+`json_write_ndjson_raw()`.
 
 ## What the mapping is
 
@@ -81,7 +90,7 @@ by default; wrap one in `I()` when a field must stay an array.
 ## What it deliberately does not do
 
 No data frame reconstruction on parse, no matrix or N-d array simplification,
-no streaming or NDJSON, no JSON pointer or patch, no custom serializers. `v1`
+no incremental streaming yet, no JSON pointer or patch, no custom serializers. `v1`
 is the JSON an HTTP client needs and nothing else.
 
 ## Safety

@@ -10,13 +10,13 @@ The framing that governs every design decision: **zujson is the JSON an HTTP cli
 
 ## Current state
 
-**v1 is complete (version 0.1.0), post-review.** yyjson 0.12.0 is vendored under `src/vendor/yyjson/`, and the public API is `json_parse()`, `json_parse_raw()`, `json_parse_file()`, `json_write()`, `json_write_raw()`, `json_validate()`, `zujson_info()`. `devtools::check(cran = TRUE)` is 0/0/0; 433 tests pass, green under `shuffle = TRUE`, and both directions are clean under `gctorture(TRUE)`.
+**v1 is complete (version 0.1.0), post-review.** yyjson 0.12.0 is vendored under `src/vendor/yyjson/`, and the public API is `json_parse()`, `json_parse_raw()`, `json_parse_file()`, `json_write()`, `json_write_raw()`, `json_validate()`, `json_parse_ndjson()`, `json_write_ndjson()`, `json_write_ndjson_raw()`, `zujson_info()`. `devtools::check(cran = TRUE)` is 0/0/0; 480 tests pass, green under `shuffle = TRUE`, and both directions are clean under `gctorture(TRUE)`.
 
-**One acceptance criterion is open, deliberately.** Design §13.9 names `zuhttp`, which is still an empty skeleton in its own repo. The shapes it will use are covered in `test-roundtrip.R`, but the criterion cannot close until there is something to integrate with.
+**One acceptance criterion is open, deliberately.** Design §14.9 names `zuhttp`, which is still an empty skeleton in its own repo. The shapes it will use are covered in `test-roundtrip.R`, but the criterion cannot close until there is something to integrate with.
 
-**Phase 2 is design §14**, not more of §13.9: a `coerce` simplification mode, data frame simplification on parse, then a public C API through `LinkingTo: zujson` once a caller actually exists.
+**Phase 2 is design §15**, not more of §14.9: a `coerce` simplification mode, data frame simplification on parse, then a public C API through `LinkingTo: zujson` once a caller actually exists.
 
-- `design-zujson.md` — numbered sections §1–§14 (§5–§6 the type mappings and why they are what they are, §7 the error model, §8 the memory model, §9 depth limiting, §13 acceptance criteria).
+- `design-zujson.md` — numbered sections §1–§15 (§5–§6 the type mappings and why they are what they are, §7 the error model, §8 the memory model, §9 depth limiting, §13 NDJSON and the deferred streaming design, §14 acceptance criteria).
 
 ## Commands
 
@@ -78,6 +78,8 @@ R API (json_*)            R/{parse,write,info,utils}.R
 
 `json_parse` / `json_write` mirrors `zuxml`'s `xml_parse` / `xml_write` so the family reads consistently from `zuhttp`.
 
+NDJSON lives in `zu_parse.c` and `zu_write.c` next to the single-document code rather than in its own file, so the static helpers (`zu_to_sexp`, `zu_from_sexp`, `ZUJSON_READ_FLAGS`, `zu_df_plan`) stay private to their translation unit. Splitting it out would mean exporting all four through the internal header for one caller.
+
 **Adding a C source file means editing `OBJECTS` in `src/Makevars` by hand** (and `Makevars.win`, which is a copy). R auto-compiles only `src/*.c`, yyjson lives in a subdirectory, and a `$(wildcard)` would force `SystemRequirements: GNU make`. A file that is not in `OBJECTS` is silently not built.
 
 ## Invariants that are easy to break
@@ -86,6 +88,8 @@ R API (json_*)            R/{parse,write,info,utils}.R
 - **Depth counts containers, not values.** The root container is level 1; a scalar inside it is not a level of its own. Check where a container is *built*, not on entry to every value — the obvious version makes the two directions disagree by one, and the parser's atomic-array shortcut hides it. `nested_json()`/`nested_list()` in `helper-expect.R` are what pin this down.
 - **`zu_mkchar()` is the only place a CHARSXP is made, and it must stay that way.** Both guards live there — the `INT_MAX` length check and the embedded-NUL check — so string values and object keys cannot drift apart. The NUL one is not theoretical: `"\u0000"` is valid JSON, and letting it reach `Rf_mkCharLenCE` raises a bare `simpleError` from the R internals that escapes the `zujson_error` contract entirely. That is the single most important thing not to regress, because `zuhttp`'s error handling is built on that contract.
 - **A data frame emits two container levels and must be charged for both.** It is the only value that does. Charging it one lets `json_write()` emit JSON that `json_parse()` then rejects — output the package will not read back, which is the worst bug shape available here. `test-write.R` pins both sides of the boundary.
+- **NDJSON framing rests on one fact: a raw newline cannot appear inside a JSON string.** That is why splitting on `\n` can never cut a record, and why `json_write_ndjson()` has no `pretty` argument — indented JSON contains newlines, so pretty-printed NDJSON is corrupt, not prettier. Do not add one. The reader is also deliberately stricter than `YYJSON_READ_STOP_WHEN_DONE`, which would accept newline-free concatenated JSON the content type does not promise.
+- **`zu_df_plan`/`zu_df_row()` are shared by `json_write()` and NDJSON** so the two cannot disagree about how a data frame row becomes an object. A change to row shape belongs there, not in either caller.
 - **`ZUJSON_READ_FLAGS` is shared by every read path** so `json_parse()` and `json_validate()` cannot disagree about what parses. Add a read flag there or not at all.
 - **`NA_INTEGER == INT_MIN`.** A JSON `-2147483648` must promote to `double`, or it comes back as `NA`. Same for anything above `INT_MAX`.
 - **Whole doubles are written without a decimal point.** R has no integer literal, so `1` is a double and yyjson's real writer emits `1.0`, which a schema expecting an integer rejects. The bound is **int64's range, not 2^53** — a double that is already whole *is* that integer at any magnitude, so converting is lossless; 2^53 is where consecutive integers stop being representable, which is a different question and the wrong test.

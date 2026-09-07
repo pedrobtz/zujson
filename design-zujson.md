@@ -5,7 +5,7 @@
 **Purpose:** Small, portable JSON parsing and serialization for R, designed for direct reuse by `zuhttp`
 **Implementation:** C with vendored yyjson
 **Target:** CRAN-compatible source package
-**Non-goals:** A `jsonlite` replacement, streaming/NDJSON, JSON Pointer/Patch/Schema, data frame reconstruction, custom serializer dispatch
+**Non-goals:** A `jsonlite` replacement, JSON Pointer/Patch/Schema, data frame reconstruction, custom serializer dispatch
 
 ---
 
@@ -346,7 +346,92 @@ Deliberately outside the suite, for later: ASan/UBSan and valgrind jobs, and
 fuzzing the parser against a corpus. PROTECT discipline is currently checked
 with `gctorture(TRUE)` over both directions.
 
-## 13. Acceptance criteria for v1
+## 13. NDJSON and streaming
+
+`application/x-ndjson` (JSON Lines) is one JSON value per line. Two separate
+things hide under "NDJSON support", and v1 ships only the first.
+
+### Why line framing is safe, not merely conventional
+
+A raw `0x0A` **cannot** appear inside a JSON string — it must be escaped — and
+zujson's writer always escapes it, so a serialized record never contains a bare
+newline. Splitting on newlines therefore cannot cut a record in half. Every
+other decision here follows from that one fact.
+
+Two consequences worth stating:
+
+- `json_write_ndjson()` has **no `pretty` argument**. Indented JSON contains
+  newlines, and a newline inside a record is exactly what the framing cannot
+  survive. Pretty-printed NDJSON is corrupt, not prettier.
+- The reader is deliberately stricter than `YYJSON_READ_STOP_WHEN_DONE`, which
+  would also accept newline-free concatenated JSON (`{...}{...}`). Accepting
+  more than the content type promises is a lenience nobody asked for.
+
+### Shipped in v1: NDJSON as a format
+
+```r
+json_parse_ndjson(x, simplify = TRUE)   # character/raw -> list of records
+json_write_ndjson(x, auto_unbox = TRUE) # list or data.frame -> NDJSON text
+json_write_ndjson_raw(x, ...)           # ... -> UTF-8 bytes
+```
+
+Parsing **always returns a list**, one element per record, however uniform the
+records are: they are independent documents, and an NDJSON body is not a table.
+Each record is parsed exactly as `json_parse()` would, so §5 applies unchanged
+and NDJSON introduces no new type-mapping rules — including the empty-array
+asymmetry, which it carries through rather than papering over.
+
+Blank lines are skipped, `\r\n` is accepted, and a parse failure reports the
+**line number**. That last one is not a nicety: "invalid JSON at byte 41827" is
+useless in a body of 10,000 records.
+
+A data frame writes one object per row, sharing `zu_df_plan`/`zu_df_row()` with
+`json_write()` so the two cannot disagree about how a row becomes an object.
+
+### Deferred: streaming as a delivery mode
+
+Consuming records as bytes arrive, without buffering the whole response — the
+thing that actually earns the word "streaming", for log tails, change feeds and
+token streams. The intended shape mirrors `zuxml`'s `xml_stream()`/`xml_feed()`:
+
+```r
+s     <- json_stream(simplify = TRUE, max_record = 16L * 1024L^2)
+recs  <- json_feed(s, chunk)   # raw chunk in -> completed records out
+recs  <- json_finish(s)        # flush; errors on an incomplete tail
+```
+
+**It is not built, deliberately.** Its API depends entirely on how `zuhttp`
+hands out chunks — callback, connection, or something else — and `zuhttp` does
+not exist yet. This is the same rule §15 applies to the C API: infrastructure
+for a caller that does not exist gets designed, not built. Guessing wrong here
+means a breaking change to a public object's lifecycle, which is the most
+expensive kind to take back.
+
+Decisions already made, so the implementation is not starting cold:
+
+1. **Frame on newlines, not on `STOP_WHEN_DONE`.** The flag can walk a buffer
+   document by document, but it cannot tell a truncated top-level *scalar* from
+   a complete one — given `12` at the end of a chunk, the next byte might be
+   `3`. A newline is an unambiguous record terminator; a document boundary is
+   not.
+2. **The retained tail must be capped** (`max_record`). A hostile stream that
+   never sends a newline would otherwise grow the buffer without bound. This is
+   the same class of knob as `zukomp`'s `max_output`, and it is the reason the
+   feature has a security dimension at all.
+3. **The tail buffer is heap state across a longjmp**, so it is owned by an
+   external pointer with a finalizer, per §8. No new memory rule is needed.
+4. **`json_finish()` errors on a non-empty incomplete tail.** A server that
+   closed mid-record is a truncated response, and silently dropping the partial
+   record would hide exactly the failure `zuhttp` needs to report.
+5. **Feeding is `raw` only.** Chunk boundaries fall between arbitrary bytes,
+   and a chunk that splits a multi-byte UTF-8 sequence is not a valid string.
+
+For reference, yyjson's incremental reader (`yyjson_incr_*`) solves a *third*
+problem — parsing one very large document progressively — and does not help
+here: it requires the complete buffer allocated up front, so it cannot consume
+an unbounded stream.
+
+## 14. Acceptance criteria for v1
 
 1. `R CMD check --as-cran` clean — 0 errors, 0 warnings, 0 notes. ✅
 2. Suite green under `shuffle = TRUE`. ✅
@@ -360,7 +445,7 @@ with `gctorture(TRUE)` over both directions.
    empty skeleton. The shapes are covered by `test-roundtrip.R`, but the
    criterion cannot close until there is something to integrate with.
 
-## 14. What comes after v1
+## 15. What comes after v1
 
 Not more of §13.9. In rough order:
 
@@ -371,4 +456,4 @@ Not more of §13.9. In rough order:
   worth doing only once a caller exists, following `zukomp`'s registered
   C-callable pattern rather than exporting yyjson types;
 - fuzzing and sanitizer CI jobs;
-- NDJSON, if a streaming API ever needs it.
+- the streaming object of §13, once `zuhttp` exists to shape its API.

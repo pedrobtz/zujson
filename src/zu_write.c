@@ -227,14 +227,23 @@ static void zu_obj_add(yyjson_mut_val *obj, SEXP nms, R_xlen_t i,
 
 /* ---- data frames --------------------------------------------------------- */
 
-/* Row oriented, because that is what an HTTP API means by a table. The
- * column-oriented reading is still available by dropping the class first. */
-static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
-    /* A data frame is the one value that emits *two* container levels at once:
-     * the array of rows at `depth`, and each row object at `depth + 1`. Both
-     * have to be charged, or json_write() can emit JSON that json_parse()
-     * then rejects as too deep. */
-    zu_check_depth(depth + 1);
+/* A data frame is planned once and then emitted row by row. The plan exists
+ * because NDJSON needs the same rows as separate documents rather than as one
+ * array, and resolving each column's kind per cell would be wasteful in both
+ * callers. */
+typedef struct {
+    R_xlen_t ncol, nrow;
+    SEXP nms;                  /* column names, validated non-empty          */
+    zu_atom *kinds;            /* one per column, R_alloc'd                  */
+    SEXP levels;               /* VECSXP: factor levels per column, or NULL  */
+} zu_df_plan;
+
+/* Returns with plan->levels PROTECTed: the caller owes exactly one
+ * UNPROTECT(1) once it is done with the plan. Protecting here rather than in
+ * the caller closes the window between allocating the vector and filling it --
+ * nothing in that loop allocates today, but a future edit that added an
+ * allocation would corrupt the vector silently rather than fail a test. */
+static void zu_df_plan_init(SEXP df, zu_df_plan *plan) {
     R_xlen_t ncol = XLENGTH(df);
     SEXP nms = Rf_getAttrib(df, R_NamesSymbol);
     if (!zu_fully_named(nms, ncol))
@@ -246,10 +255,11 @@ static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
     R_xlen_t nrow = ncol > 0 ? XLENGTH(VECTOR_ELT(df, 0))
                              : XLENGTH(Rf_getAttrib(df, R_RowNamesSymbol));
 
-    /* Resolve each column's kind once rather than per cell. */
     zu_atom *kinds = (zu_atom *) R_alloc((size_t) (ncol > 0 ? ncol : 1),
                                          sizeof(zu_atom));
-    SEXP levels_holder = PROTECT(Rf_allocVector(VECSXP, ncol));
+    SEXP levels = PROTECT(Rf_allocVector(VECSXP, ncol));   /* caller unprotects */
+    plan->levels = levels;
+
     for (R_xlen_t j = 0; j < ncol; j++) {
         SEXP col = VECTOR_ELT(df, j);
         if (Rf_inherits(col, "data.frame"))
@@ -261,28 +271,50 @@ static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
                     "column '%s' has %ld rows, expected %ld",
                     Rf_translateCharUTF8(STRING_ELT(nms, j)),
                     (long) XLENGTH(col), (long) nrow);
-        SEXP levels;
-        kinds[j] = zu_atom_kind(col, &levels);
-        SET_VECTOR_ELT(levels_holder, j, levels);
+        SEXP lv;
+        kinds[j] = zu_atom_kind(col, &lv);
+        SET_VECTOR_ELT(levels, j, lv);
     }
+    plan->ncol = ncol;
+    plan->nrow = nrow;
+    plan->nms = nms;
+    plan->kinds = kinds;
+}
+
+/* One row as a JSON object. `depth` is the level of the object itself. */
+static yyjson_mut_val *zu_df_row(SEXP df, const zu_df_plan *plan, R_xlen_t i,
+                                 zu_wctx *ctx, int depth) {
+    yyjson_mut_val *row = zu_ok(yyjson_mut_obj(ctx->doc));
+    for (R_xlen_t j = 0; j < plan->ncol; j++) {
+        /* depth + 1: the cell sits inside the row object. */
+        yyjson_mut_val *v = zu_w_elt(VECTOR_ELT(df, j), plan->kinds[j],
+                                     VECTOR_ELT(plan->levels, j),
+                                     i, ctx, depth + 1);
+        zu_obj_add(row, plan->nms, j, v, ctx);
+    }
+    return row;
+}
+
+/* Row oriented, because that is what an HTTP API means by a table. */
+static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
+    /* A data frame is the one value that emits *two* container levels at once:
+     * the array of rows at `depth`, and each row object at `depth + 1`. Both
+     * have to be charged, or json_write() can emit JSON that json_parse()
+     * then rejects as too deep. */
+    zu_check_depth(depth + 1);
+
+    zu_df_plan plan;
+    zu_df_plan_init(df, &plan);            /* leaves plan.levels PROTECTed */
 
     yyjson_mut_val *arr = zu_ok(yyjson_mut_arr(ctx->doc));
-    for (R_xlen_t i = 0; i < nrow; i++) {
-        yyjson_mut_val *row = zu_ok(yyjson_mut_obj(ctx->doc));
-        for (R_xlen_t j = 0; j < ncol; j++) {
-            /* depth + 2: the cell sits inside the row object, which sits
-             * inside the array of rows. */
-            yyjson_mut_val *v = zu_w_elt(VECTOR_ELT(df, j), kinds[j],
-                                         VECTOR_ELT(levels_holder, j),
-                                         i, ctx, depth + 2);
-            zu_obj_add(row, nms, j, v, ctx);
-        }
-        yyjson_mut_arr_add_val(arr, row);
+    for (R_xlen_t i = 0; i < plan.nrow; i++) {
+        yyjson_mut_arr_add_val(arr, zu_df_row(df, &plan, i, ctx, depth + 1));
         zu_tick(ctx);
     }
     UNPROTECT(1);
     return arr;
 }
+
 
 /* ---- the dispatcher ------------------------------------------------------ */
 
@@ -385,5 +417,77 @@ SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
     zu_extptr_release(buf_owner);
     zu_extptr_release(owner);
     UNPROTECT(3);
+    return out;
+}
+
+/* ---------------------------------------------------------------------------
+ * NDJSON
+ *
+ * One line per record, so each record gets its own document and its own write.
+ * Returns the lines; joining them is left to R, which can do it in one call.
+ *
+ * There is deliberately no `pretty` here. Indented JSON contains newlines, and
+ * a newline inside a record is precisely what NDJSON framing cannot survive --
+ * a pretty-printed NDJSON stream is a corrupt one, not a nicer one.
+ * ------------------------------------------------------------------------- */
+SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
+    int auto_unbox = Rf_asLogical(auto_unbox_);
+    int is_df = Rf_inherits(x_, "data.frame");
+
+    zu_df_plan plan;
+    R_xlen_t n;
+
+    /* Both branches leave exactly one thing protected, so the UNPROTECT(2) at
+     * the end is right either way. */
+    if (is_df) {
+        zu_df_plan_init(x_, &plan);        /* leaves plan.levels PROTECTed */
+        n = plan.nrow;
+    } else {
+        if (TYPEOF(x_) != VECSXP)
+            zu_stop("zujson_unsupported_type",
+                    "NDJSON needs a list of records or a data frame, not '%s'",
+                    Rf_type2char((SEXPTYPE) TYPEOF(x_)));
+        PROTECT(R_NilValue);
+        n = XLENGTH(x_);
+    }
+
+    SEXP out = PROTECT(Rf_allocVector(STRSXP, n));
+
+    for (R_xlen_t i = 0; i < n; i++) {
+        yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+        if (!doc) Rf_error("out of memory allocating a JSON document");
+        SEXP owner = PROTECT(zu_extptr_own_mut_doc(doc));
+
+        zu_wctx ctx = { doc, auto_unbox, 0 };
+        yyjson_mut_doc_set_root(doc, is_df
+            ? zu_df_row(x_, &plan, i, &ctx, 1)
+            : zu_from_sexp(VECTOR_ELT(x_, i), &ctx, 1));
+
+        size_t len = 0;
+        yyjson_write_err werr;
+        char *buf = yyjson_mut_write_opts(doc, YYJSON_WRITE_NOFLAG, NULL,
+                                          &len, &werr);
+        if (!buf) {
+            UNPROTECT(1);
+            zu_stop("zujson_write_error",
+                    "could not write NDJSON record %ld: %s",
+                    (long) (i + 1), werr.msg);
+        }
+
+        SEXP buf_owner = PROTECT(zu_extptr_own_buf(buf));
+        if (len > (size_t) INT_MAX)
+            zu_stop("zujson_write_error",
+                    "NDJSON record %ld is %lu bytes, too long for an R string",
+                    (long) (i + 1), (unsigned long) len);
+        SET_STRING_ELT(out, i, Rf_mkCharLenCE(buf, (int) len, CE_UTF8));
+
+        zu_extptr_release(buf_owner);
+        zu_extptr_release(owner);
+        UNPROTECT(2);
+
+        if ((i & 0x3FF) == 0) R_CheckUserInterrupt();
+    }
+
+    UNPROTECT(2);   /* out, and the plan's levels (or its R_NilValue stand-in) */
     return out;
 }

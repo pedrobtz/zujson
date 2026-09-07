@@ -339,3 +339,90 @@ SEXP zujson_validate_str(SEXP x_) {
 SEXP zujson_validate_raw(SEXP x_) {
     return zu_validate_mem((const char *) RAW(x_), (size_t) XLENGTH(x_));
 }
+
+/* ---------------------------------------------------------------------------
+ * NDJSON (application/x-ndjson): one JSON value per line.
+ *
+ * Framing is by newline, and that is safe rather than merely conventional: a
+ * raw 0x0A is not legal inside a JSON string (it has to be escaped), so a line
+ * break can never fall inside a record. This is the property the whole format
+ * rests on, and it is what lets a reader find record boundaries without
+ * parsing.
+ *
+ * Deliberately stricter than yyjson's YYJSON_READ_STOP_WHEN_DONE, which would
+ * also accept newline-free concatenated JSON. Accepting more than the content
+ * type promises is a lenience nobody asked for.
+ * ------------------------------------------------------------------------- */
+
+static int zu_line_blank(const char *s, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (s[i] != ' ' && s[i] != '\t' && s[i] != '\r' && s[i] != '\n')
+            return 0;
+    return 1;
+}
+
+/* End of the line starting at `i`: `*stop` excludes the newline and a CR
+ * before it, `*next` is where the following line begins. */
+static void zu_line_bounds(const char *dat, size_t len, size_t i,
+                           size_t *stop, size_t *next) {
+    size_t j = i;
+    while (j < len && dat[j] != '\n') j++;
+    *next = (j < len) ? j + 1 : j;
+    if (j > i && dat[j - 1] == '\r') j--;   /* tolerate CRLF: servers send it */
+    *stop = j;
+}
+
+static SEXP zu_read_ndjson(const char *dat, size_t len, int simplify) {
+    size_t i, stop, next;
+
+    /* Counted first so the result can be allocated exactly once. Scanning for
+     * newlines twice is far cheaper than growing a list record by record. */
+    R_xlen_t n = 0;
+    for (i = 0; i < len; i = next) {
+        zu_line_bounds(dat, len, i, &stop, &next);
+        if (!zu_line_blank(dat + i, stop - i)) n++;
+    }
+
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, n));
+    R_xlen_t k = 0;
+    unsigned long lineno = 0;
+
+    for (i = 0; i < len; i = next) {
+        zu_line_bounds(dat, len, i, &stop, &next);
+        lineno++;
+        if (zu_line_blank(dat + i, stop - i)) continue;  /* blank lines are not records */
+
+        yyjson_read_err err;
+        yyjson_doc *doc = yyjson_read_opts((char *) dat + i, stop - i,
+                                           ZUJSON_READ_FLAGS, NULL, &err);
+        /* The line number is the whole point: "invalid JSON at byte 41827" is
+         * useless in a 10,000-record body. */
+        if (!doc)
+            zu_stop("zujson_parse_error",
+                    "invalid JSON on line %lu at byte %lu of that line: %s",
+                    lineno, (unsigned long) err.pos, err.msg);
+
+        SEXP owner = PROTECT(zu_extptr_own_doc(doc));
+        SET_VECTOR_ELT(out, k++, zu_to_sexp(yyjson_doc_get_root(doc), simplify, 1));
+        zu_extptr_release(owner);
+        UNPROTECT(1);
+
+        if ((lineno & 0x3FFu) == 0) R_CheckUserInterrupt();
+    }
+
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_) {
+    SEXP s = STRING_ELT(x_, 0);
+    if (s == NA_STRING)
+        zu_stop("zujson_parse_error", "`x` is NA, not NDJSON text");
+    const char *dat = Rf_translateCharUTF8(s);
+    return zu_read_ndjson(dat, strlen(dat), Rf_asLogical(simplify_));
+}
+
+SEXP zujson_parse_ndjson_raw(SEXP x_, SEXP simplify_) {
+    return zu_read_ndjson((const char *) RAW(x_), (size_t) XLENGTH(x_),
+                          Rf_asLogical(simplify_));
+}

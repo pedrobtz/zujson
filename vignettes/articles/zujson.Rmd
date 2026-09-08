@@ -50,6 +50,70 @@ The mapping in full:
 | `[]`, `[null, null]` | `logical(0)`, `c(NA, NA)` |
 | `null` | `NULL` |
 
+## Simplification modes
+
+`simplify` decides what happens to an array whose elements do not share a
+kind. That is the *only* thing it changes: the promotions within the numeric
+family are the same in every mode, and a nested container is never coerced
+away.
+
+```{r}
+json_parse('[1, "a"]')                        # preserve, the default
+json_parse('[1, "a"]', simplify = "coerce")
+json_parse('[1, "a"]', simplify = "none")
+```
+
+`preserve` keeps the type and gives up the uniform shape, on the view that a
+field which is usually a number and occasionally a string is a bug worth
+seeing rather than one worth papering over. `coerce` is the opt-in for callers
+who would rather have the vector. It follows R's own promotion exactly, so the
+strings are the ones `as.character()` gives --- which matters more than it
+sounds, because a hand-rolled format would not agree with R at 15 significant
+digits:
+
+```{r}
+json_parse('[0.3333333333333333, "a"]', simplify = "coerce")
+identical(json_parse('[1, null, "a"]', simplify = "coerce"), c("1", NA, "a"))
+```
+
+Note that JSON `null` becomes `NA` there and never the string `"NA"`.
+
+`TRUE` and `FALSE` remain exact synonyms for `"preserve"` and `"none"`, so
+nothing written against the original API changes meaning.
+
+## Data frames
+
+`data_frame = TRUE` turns any non-empty array whose elements are all objects
+--- the shape an API uses for a list of records --- into a data frame.
+
+```{r}
+json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)
+```
+
+Records are not required to agree on their keys. Columns are the union, in the
+order first seen, and a record missing a key contributes `NA`, so the result is
+rectangular however ragged the input:
+
+```{r}
+json_parse('[{"a":1},{"b":2},{"a":3,"c":4}]', data_frame = TRUE)
+```
+
+Each column is simplified with the active `simplify` mode, so the two features
+compose rather than competing:
+
+```{r}
+str(json_parse('[{"v":1},{"v":"x"}]', data_frame = TRUE)$v)
+str(json_parse('[{"v":1},{"v":"x"}]', data_frame = TRUE, simplify = "coerce")$v)
+```
+
+Anything that is not a non-empty array of objects is left exactly as it was,
+and the reconstruction applies wherever such an array appears, however deeply
+nested.
+
+```{r}
+str(json_parse('{"rows":[{"a":1},{"a":2}]}', data_frame = TRUE))
+```
+
 ## Serializing
 
 A **fully named** vector or list becomes an object; anything else becomes an
@@ -130,9 +194,10 @@ zujson_info()
 
 ## What it deliberately does not do
 
-No data frame reconstruction on parse, no matrix or N-d array simplification,
-no incremental streaming yet, no JSON pointer or patch, no custom serializers.
-`v1` is the JSON an HTTP client needs and nothing else.
+No matrix or N-d array simplification, no incremental streaming yet, no JSON
+pointer or patch, no custom serializers. Data frame reconstruction is opt-in
+rather than absent, and stays off by default so that the type mapping above is
+what you get unless you ask for something else.
 
 ## Related
 

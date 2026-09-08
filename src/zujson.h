@@ -34,15 +34,15 @@ SEXP zu_extptr_own_buf(void *buf);
 void zu_extptr_release(SEXP xp);
 
 /* ---- .Call entry points ---- */
-SEXP zujson_parse_str(SEXP x_, SEXP simplify_);        /* zu_parse.c */
-SEXP zujson_parse_raw(SEXP x_, SEXP simplify_);        /* zu_parse.c */
-SEXP zujson_parse_file(SEXP path_, SEXP simplify_);    /* zu_parse.c */
+SEXP zujson_parse_str(SEXP x_, SEXP simplify_, SEXP df_);   /* zu_parse.c */
+SEXP zujson_parse_raw(SEXP x_, SEXP simplify_, SEXP df_);   /* zu_parse.c */
+SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_); /* zu_parse.c */
 SEXP zujson_validate_str(SEXP x_);                     /* zu_parse.c */
 SEXP zujson_validate_raw(SEXP x_);                     /* zu_parse.c */
 SEXP zujson_write(SEXP x_, SEXP pretty_,               /* zu_write.c */
                   SEXP auto_unbox_, SEXP as_raw_);
-SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_); /* zu_parse.c */
-SEXP zujson_parse_ndjson_raw(SEXP x_, SEXP simplify_); /* zu_parse.c */
+SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_, SEXP df_);
+SEXP zujson_parse_ndjson_raw(SEXP x_, SEXP simplify_, SEXP df_);
 SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_);    /* zu_write.c */
 SEXP zujson_build_info(void);                          /* zu_info.c  */
 

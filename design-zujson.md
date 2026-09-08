@@ -126,16 +126,22 @@ R's `integer` is 32-bit and `NA_INTEGER` *is* `INT_MIN`, so:
 
 These were the questions left open in the earlier `jsx3` notes. v1's answers:
 
-1. **Default mode** — `preserve`, as above. `coerce` is not implemented; adding
-   it later is a new argument value, not a breaking change.
+1. **Default mode** — `preserve`, as above. `coerce` **is** implemented, as
+   the new argument value this predicted: `simplify = "coerce"` promotes a
+   mixed-kind array to character following R's own rules, and `TRUE`/`FALSE`
+   stay exact synonyms for `"preserve"`/`"none"`. The default did not change.
 2. **Logical as its own kind?** No: `[true,1]` is `integer`, because `TRUE -> 1`
    is lossless.
 3. **Empty array `[]`** — `logical(0)`.
 4. **All-null `[null,null]`** — `c(NA, NA)`, R's convention.
 5. **Matrix detection** — not in v1.
 6. **N-d arrays** — not in v1.
-7. **data.frame detection** — not in v1. An array of objects is a list of named
-   lists.
+7. **data.frame detection** — **implemented, opt-in**, via `data_frame = TRUE`.
+   Off by default, so an array of objects is still a list of named lists unless
+   asked otherwise. Columns are the union of the keys in first-seen order, a
+   record missing a key contributes `NA`, and each column simplifies with the
+   active `simplify` mode. The union rule is what makes the result rectangular
+   without the caller having to guarantee that the records agree.
 8. **Objects** — always a named list, no exceptions.
 
 ### Valid JSON that R cannot hold
@@ -449,11 +455,19 @@ an unbounded stream.
 
 Not more of §13.9. In rough order:
 
-- `simplify = "coerce"` as an opt-in mode (§5, question 1);
-- data frame simplification on parse, which is the one asymmetry users will
-  actually ask about;
+- ~~`simplify = "coerce"` as an opt-in mode (§5, question 1);~~ **done.**
+- ~~data frame simplification on parse, which is the one asymmetry users will
+  actually ask about;~~ **done**, opt-in via `data_frame = TRUE` (§5, q7).
 - a public C API through `LinkingTo: zujson`, so `zuhttp` can parse from C —
   worth doing only once a caller exists, following `zukomp`'s registered
-  C-callable pattern rather than exporting yyjson types;
-- fuzzing and sanitizer CI jobs;
-- the streaming object of §13, once `zuhttp` exists to shape its API.
+  C-callable pattern rather than exporting yyjson types; **still blocked on
+  that caller.**
+- ~~fuzzing and sanitizer CI jobs;~~ **done**: `hardening.yaml` runs
+  `tools/sanitizer-exercise.R` under clang-asan, clang-ubsan and gcc-asan and
+  fuzzes the parser through the R API; `tests/testthat/test-fuzz.R` runs a
+  smaller version on every test run.
+- the streaming object of §13, once `zuhttp` exists to shape its API. **Still
+  blocked on the same thing.**
+
+What remains is exactly the work that cannot start until `zuhttp` is more than
+a skeleton — which is also what acceptance criterion §14.9 is waiting for.

@@ -26,13 +26,36 @@
 #' otherwise. A `null` inside an array being simplified becomes `NA`; a `null`
 #' anywhere else becomes `NULL`. Strings arrive as UTF-8.
 #'
-#' Simplification never coerces across kinds: `[1, "a"]` stays a list rather
-#' than becoming `c("1", "a")`, so a value's type survives the round trip. Set
-#' `simplify = FALSE` to get a list for every array regardless.
+# Simplification modes
 #'
-#' Arrays of objects are *not* turned into data frames. Nesting deeper than
-#' 1000 levels is rejected with a `zujson_depth_error`, which is what makes the
-#' parser safe to point at an untrusted response body.
+#' `simplify` picks what happens to an array whose elements do not share a
+#' kind. The three modes agree everywhere else, including the promotions
+#' *within* the numeric family (`[true, 1]` is `c(1L, 1L)` in all of them):
+#'
+#' | mode | `[1, "a"]` becomes |
+#' | --- | --- |
+#' | `"preserve"`, or `TRUE` (default) | `list(1L, "a")` |
+#' | `"coerce"` | `c("1", "a")` |
+#' | `"none"`, or `FALSE` | `list(1L, "a")`, and every other array is a list too |
+#'
+#' `preserve` keeps the type and gives up the uniform shape, on the view that a
+#' field which is usually a number and occasionally a string is a bug worth
+#' seeing. `coerce` is the opt-in for callers who would rather have the vector:
+#' it follows R's own promotion, so the strings are exactly what
+#' `as.character()` produces. A nested object or array is never coerced away.
+#'
+#' # Data frames
+#'
+#' `data_frame = TRUE` turns any non-empty array whose elements are *all*
+#' objects into a data frame. Columns are the union of the keys in the order
+#' first seen; a record missing a key contributes `NA`, so the result is
+#' rectangular however ragged the records are. Each column is then simplified
+#' with the active `simplify` mode, so a column of mixed kinds is a list column
+#' under `preserve` and a character column under `coerce`. It applies wherever
+#' such an array appears, however deeply nested.
+#'
+#' Nesting deeper than 1000 levels is rejected with a `zujson_depth_error`,
+#' which is what makes the parser safe to point at an untrusted response body.
 #'
 #' A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
 #' forbids emitting one but allows ignoring it, and real APIs emit them.
@@ -47,8 +70,13 @@
 #' @param x For `json_parse()`, a single string of JSON text or a raw vector of
 #'   UTF-8 JSON bytes. For `json_parse_raw()`, a raw vector.
 #' @param path Path to a file containing JSON.
-#' @param simplify Whether to simplify JSON arrays to atomic vectors. `TRUE`
-#'   (the default) applies the table above; `FALSE` makes every array a list.
+#' @param simplify How to simplify JSON arrays to atomic vectors: one of
+#'   `"preserve"` (the default), `"coerce"` or `"none"`. `TRUE` and `FALSE` are
+#'   accepted as synonyms for `"preserve"` and `"none"`. See *Simplification
+#'   modes* below.
+#' @param data_frame Whether an array of objects becomes a data frame. `FALSE`
+#'   by default, in which case it stays a list of named lists. See *Data
+#'   frames* below.
 #'
 #' @return The parsed R object.
 #' @seealso [json_write()] for the other direction, [json_validate()] to check
@@ -66,13 +94,20 @@
 #'
 #' # no simplification at all
 #' json_parse('[1, 2, 3]', simplify = FALSE)
-json_parse <- function(x, simplify = TRUE) {
-  simplify <- zu_check_flag(simplify, "simplify")
+#'
+#' # coerce across kinds instead of keeping the type
+#' json_parse('[1, "a"]', simplify = "coerce")
+#'
+#' # an array of records, as a data frame
+#' json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)
+json_parse <- function(x, simplify = TRUE, data_frame = FALSE) {
+  simplify <- zu_check_simplify(simplify)
+  data_frame <- zu_check_flag(data_frame, "data_frame")
   if (is.raw(x)) {
-    return(.Call(C_zujson_parse_raw, x, simplify))
+    return(.Call(C_zujson_parse_raw, x, simplify, data_frame))
   }
   x <- zu_check_string(x, "x")
-  .Call(C_zujson_parse_str, x, simplify)
+  .Call(C_zujson_parse_str, x, simplify, data_frame)
 }
 
 #' @rdname json_parse
@@ -80,11 +115,12 @@ json_parse <- function(x, simplify = TRUE) {
 #' @examples
 #'
 #' json_parse_raw(charToRaw('[1, 2, 3]'))
-json_parse_raw <- function(x, simplify = TRUE) {
+json_parse_raw <- function(x, simplify = TRUE, data_frame = FALSE) {
   if (!is.raw(x)) {
     zu_abort("zujson_arg_error", "`x` must be a raw vector.")
   }
-  .Call(C_zujson_parse_raw, x, zu_check_flag(simplify, "simplify"))
+  .Call(C_zujson_parse_raw, x, zu_check_simplify(simplify),
+        zu_check_flag(data_frame, "data_frame"))
 }
 
 #' @rdname json_parse
@@ -95,7 +131,7 @@ json_parse_raw <- function(x, simplify = TRUE) {
 #' writeLines('{"a": [1, 2]}', path)
 #' json_parse_file(path)
 #' unlink(path)
-json_parse_file <- function(path, simplify = TRUE) {
+json_parse_file <- function(path, simplify = TRUE, data_frame = FALSE) {
   path <- zu_check_string(path, "path")
   # Expand here rather than let the C fopen() see a literal "~": file.exists()
   # expands it and fopen() does not, so without this a readable file reports
@@ -104,7 +140,8 @@ json_parse_file <- function(path, simplify = TRUE) {
   if (!file.exists(path)) {
     zu_abort("zujson_arg_error", paste0("File '", path, "' does not exist."))
   }
-  .Call(C_zujson_parse_file, path, zu_check_flag(simplify, "simplify"))
+  .Call(C_zujson_parse_file, path, zu_check_simplify(simplify),
+        zu_check_flag(data_frame, "data_frame"))
 }
 
 #' Check whether input is valid JSON

@@ -1,3 +1,29 @@
+# zujson (development version)
+
+## Parsing
+
+* `simplify` gains named modes. `"preserve"` (the default, and what `TRUE`
+  has always meant) keeps a mixed-kind array as a list; `"coerce"` promotes it
+  to a character vector following R's own rules, so `[1, "a"]` becomes
+  `c("1", "a")` and a JSON `null` becomes `NA` rather than the string `"NA"`.
+  `"none"` is `FALSE`. `TRUE` and `FALSE` keep working and mean exactly what
+  they did, so nothing written against the old API changes meaning.
+
+* `data_frame = TRUE` turns a non-empty array whose elements are all objects
+  into a data frame, wherever one appears. Columns are the union of the keys
+  in first-seen order and a missing key reads as `NA`, so ragged records still
+  give a rectangular result. Columns simplify with the active `simplify` mode.
+  Off by default: the documented type mapping is unchanged unless you ask.
+
+## Infrastructure
+
+* Sanitizer and randomised-input CI. `tools/sanitizer-exercise.R` drives the C
+  layer using nothing but base R, with most of its effort on the error paths,
+  where an R error longjmps past the explicit free; `hardening.yaml` runs it
+  under clang-asan, clang-ubsan and gcc-asan, and fuzzes the parser separately.
+  `tests/testthat/test-fuzz.R` runs a smaller version of the same idea on every
+  test run.
+
 # zujson 0.1.0
 
 First release.

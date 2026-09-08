@@ -29,6 +29,9 @@
 #'   bytes. For the writers, a list of records or a data frame — a data frame is
 #'   written one object per row, which is the shape NDJSON exists for.
 #' @param simplify Passed through to [json_parse()] for each record.
+#' @param data_frame Passed through to [json_parse()] for each record. Note
+#'   that records are parsed one at a time, so this turns an array *inside* a
+#'   record into a data frame; it does not make a frame out of the stream.
 #' @param auto_unbox Passed through to [json_write()] for each record.
 #'
 #' @return `json_parse_ndjson()` returns a list with one element per record.
@@ -48,13 +51,14 @@
 #' # round trip
 #' recs <- list(list(a = 1L), list(b = "x"))
 #' identical(json_parse_ndjson(json_write_ndjson(recs)), recs)
-json_parse_ndjson <- function(x, simplify = TRUE) {
-  simplify <- zu_check_flag(simplify, "simplify")
+json_parse_ndjson <- function(x, simplify = TRUE, data_frame = FALSE) {
+  simplify <- zu_check_simplify(simplify)
+  data_frame <- zu_check_flag(data_frame, "data_frame")
   if (is.raw(x)) {
-    return(.Call(C_zujson_parse_ndjson_raw, x, simplify))
+    return(.Call(C_zujson_parse_ndjson_raw, x, simplify, data_frame))
   }
   x <- zu_check_string(x, "x")
-  .Call(C_zujson_parse_ndjson_str, x, simplify)
+  .Call(C_zujson_parse_ndjson_str, x, simplify, data_frame)
 }
 
 #' @rdname json_parse_ndjson

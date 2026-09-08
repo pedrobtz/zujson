@@ -1,0 +1,89 @@
+# Checks that are too slow or too specialised for the per-push R-CMD-check run.
+#
+# The C boundary is where this package should be unusually strict: it vendors a
+# C parser and points it at untrusted response bodies. These jobs are what make
+# the robustness claims testable rather than asserted.
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  schedule:
+    # Weekly, so that a latent problem surfaces without waiting for a push.
+    - cron: "0 4 * * 2"
+  workflow_dispatch:
+
+name: hardening.yaml
+
+permissions: read-all
+
+jobs:
+  sanitizers:
+    runs-on: ubuntu-latest
+    name: ${{ matrix.sanitizer }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Image names come from https://r-hub.github.io/containers/.
+        # There is no gcc-san; the sanitizer images are these three.
+        sanitizer: [clang-asan, clang-ubsan, gcc-asan]
+
+    container:
+      image: ghcr.io/r-hub/containers/${{ matrix.sanitizer }}:latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Deliberately no testthat: the r-hub binary repository does not host it,
+      # and building it and its dependencies from source under a sanitizer is
+      # slow and fragile. tools/sanitizer-exercise.R needs nothing but base R,
+      # and the sanitizer cares about the C layer, not about the assertions.
+      - name: Install the package
+        run: R CMD INSTALL .
+
+      - name: Run the exerciser under the sanitizer
+        # A parse error is a longjmp past the explicit free, leaving the
+        # external pointer's finalizer to reclaim the document, so the error
+        # paths are exactly what needs watching here.
+        #
+        # These containers run `sh -e`, not bash: `set -o pipefail` is an
+        # illegal option, and under `-e` a failing Rscript aborts the step
+        # before the log is printed. `|| status=$?` keeps the status without
+        # tripping `-e`.
+        run: |
+          status=0
+          Rscript tools/sanitizer-exercise.R > sanitizer.log 2>&1 || status=$?
+          cat sanitizer.log
+          if grep -qiE "runtime error|AddressSanitizer|LeakSanitizer|SUMMARY: .*Sanitizer" sanitizer.log; then
+            echo "::error::sanitizer reported a problem"
+            exit 1
+          fi
+          exit $status
+
+  fuzz:
+    runs-on: ubuntu-latest
+    name: randomised input
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      # Far more iterations than the per-run default, which is kept small so
+      # that the ordinary suite stays fast.
+      ZUJSON_FUZZ: "50000"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat, any::withr, local::.
+          needs: check
+
+      - name: Fuzz the parser
+        run: |
+          Rscript -e 'stopifnot(length(testthat::test_local(
+            filter = "fuzz", reporter = "summary", stop_on_failure = TRUE)) > 0)'

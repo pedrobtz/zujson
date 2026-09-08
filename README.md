@@ -1,111 +1,67 @@
 # zujson
 
 <!-- badges: start -->
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+[![R-CMD-check](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml)
+[![coverage](https://raw.githubusercontent.com/pedrobtz/zujson/main/.github/badges/coverage.svg)](https://github.com/pedrobtz/zujson/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
-`zujson` converts between JSON and ordinary R vectors and lists. It vendors
-[yyjson](https://github.com/ibireme/yyjson) and needs no system JSON library.
-
-It exists to serve `zuhttp`: parsing a response body and building a request
-body are the two things it is designed around, and it is deliberately narrower
-than `jsonlite`.
+zujson converts between JSON and ordinary R vectors and lists, using vendored
+[yyjson](https://github.com/ibireme/yyjson) sources, so no system JSON library
+is required. It exists to serve `zuhttp`: parsing a response body and building a
+request body are the two things it is designed around, which makes it
+deliberately narrower than `jsonlite`, with a type mapping that is fully documented.
 
 ## Installation
 
-```r
+Install the development version from GitHub:
+
+``` r
 # install.packages("pak")
 pak::pak("pedrobtz/zujson")
 ```
 
 ## Usage
 
-Nine functions, and that is the whole package.
+`json_parse()` turns JSON into R objects. An array becomes an atomic vector when
+its elements agree on a type, and a list when they do not — the type is never
+coerced away.
 
-```r
+``` r
 library(zujson)
 
-# JSON -> R
 json_parse('{"ok": true, "ids": [1, 2, 3]}')
 #> $ok
 #> [1] TRUE
-#>
+#> 
 #> $ids
 #> [1] 1 2 3
+```
 
-# R -> JSON
+`json_write()` goes the other way. A fully named vector or list becomes an
+object, anything else becomes an array.
+
+``` r
 json_write(list(query = "cats", limit = 10L))
 #> [1] "{\"query\":\"cats\",\"limit\":10}"
 ```
 
-A response body arrives as raw bytes, and a request body should leave as raw
+A response body arrives as raw bytes and a request body should leave as raw
 bytes, so both directions take and return them without a detour through a
 string:
 
-```r
-json_parse(response_bytes)          # raw vector in, R object out
-json_write_raw(list(q = "cats"))    # R object in, UTF-8 bytes out
+``` r
+json_write_raw(list(q = "cats"))
+#>  [1] 7b 22 71 22 3a 22 63 61 74 73 22 7d
+
+json_parse(json_write_raw(list(q = "cats")))
+#> $q
+#> [1] "cats"
 ```
 
-NDJSON (`application/x-ndjson`) is one JSON value per line — the shape of log
-tails, change feeds and bulk uploads:
-
-```r
-json_parse_ndjson(body)                       # -> list, one element per record
-json_write_ndjson(data.frame(id = 1:2))       # -> one object per row
-```
-
-The rest: `json_parse_raw()`, `json_parse_file()`, `json_validate()` and
-`json_write_ndjson_raw()`.
-
-## What the mapping is
-
-JSON objects always become named lists. JSON arrays become an atomic vector
-when their elements agree on a type, and a list when they do not — the type is
-never coerced away, so `[1, "a"]` is a list rather than `c("1", "a")`.
-
-| JSON | R |
-| --- | --- |
-| `{"a": 1}` | `list(a = 1L)` |
-| `[1, 2, 3]` | `1:3` |
-| `[1, "a"]` | `list(1L, "a")` |
-| `[]`, `[null, null]` | `logical(0)`, `c(NA, NA)` |
-| `null` | `NULL` |
-
-Going the other way, a **fully named** vector or list becomes an object and
-anything else becomes an array. Length-1 atomic vectors unbox to bare scalars
-by default; wrap one in `I()` when a field must stay an array.
-
-| R | JSON |
-| --- | --- |
-| `list(a = 1, b = 2)` | `{"a":1,"b":2}` |
-| `c(a = 1, b = 2)` | `{"a":1,"b":2}` |
-| `list(1, 2)` | `[1,2]` |
-| `"x"` / `I("x")` | `"x"` / `["x"]` |
-| `NA`, `NaN`, `Inf` | `null` |
-| `Date`, `POSIXct` | ISO 8601 strings, UTC |
-| `data.frame` | one object per row |
-
-`?json_parse` and `?json_write` carry the full tables.
-
-## What it deliberately does not do
-
-No data frame reconstruction on parse, no matrix or N-d array simplification,
-no incremental streaming yet, no JSON pointer or patch, no custom serializers. `v1`
-is the JSON an HTTP client needs and nothing else.
-
-## Safety
-
-Parsing is meant to be pointed at an untrusted response body: yyjson validates
-UTF-8, and nesting beyond 1000 levels is rejected with a structured condition
-rather than walking off the C stack. Every failure the package raises inherits
-from `zujson_error`, so one handler catches all of them.
-
-```r
-tryCatch(json_parse(body), zujson_error = function(e) NULL)
-```
-
-## Related
-
-`zujson` is part of the `zu*` family: [zukomp](https://github.com/pedrobtz/zukomp)
-for compression, `zuxml` for XML, and `zuhttp` for the HTTP client that uses
-them.
+`json_parse_ndjson()` and `json_write_ndjson()` handle
+`application/x-ndjson`; `json_parse_file()`, `json_parse_raw()`,
+`json_validate()` and `json_write_ndjson_raw()` round out the set. The [getting
+started article](https://pedrobtz.github.io/zujson/articles/zujson.html) carries
+the full type mapping in both directions, the safety limits, and what the
+package deliberately does not do.

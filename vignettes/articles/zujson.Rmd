@@ -1,0 +1,143 @@
+---
+title: "Getting started with zujson"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r setup}
+library(zujson)
+```
+
+`zujson` exists to serve `zuhttp`: parsing a response body and building a
+request body are the two things it is designed around. That is why it is
+narrower than `jsonlite`, and why the type mapping below is part of the
+contract rather than an implementation detail — what goes in and what comes out
+should both be predictable.
+
+Ten functions, and that is the whole package.
+
+## Parsing
+
+`json_parse()` accepts a character string or a raw vector; `json_parse_raw()`
+and `json_parse_file()` are the explicit forms, and `json_validate()` answers
+the question without building anything.
+
+```{r}
+json_parse('{"ok": true, "ids": [1, 2, 3]}')
+
+json_validate('{"a": 1}')
+json_validate("{bad")
+```
+
+JSON objects always become named lists. Arrays become an atomic vector when
+their elements agree on a type and a list when they do not, so the type is
+never coerced away:
+
+```{r}
+json_parse("[1, 2, 3]")
+json_parse('[1, "a"]')
+```
+
+The mapping in full:
+
+| JSON | R |
+| --- | --- |
+| `{"a": 1}` | `list(a = 1L)` |
+| `[1, 2, 3]` | `1:3` |
+| `[1, "a"]` | `list(1L, "a")` |
+| `[]`, `[null, null]` | `logical(0)`, `c(NA, NA)` |
+| `null` | `NULL` |
+
+## Serializing
+
+A **fully named** vector or list becomes an object; anything else becomes an
+array. Length-1 atomic vectors unbox to bare scalars by default, so wrap one in
+`I()` when a field must stay an array.
+
+```{r}
+json_write(list(a = 1, b = 2))
+json_write(c(a = 1, b = 2))
+json_write(list(1, 2))
+
+json_write("x")
+json_write(I("x"))
+```
+
+| R | JSON |
+| --- | --- |
+| `list(a = 1, b = 2)` | `{"a":1,"b":2}` |
+| `c(a = 1, b = 2)` | `{"a":1,"b":2}` |
+| `list(1, 2)` | `[1,2]` |
+| `"x"` / `I("x")` | `"x"` / `["x"]` |
+| `NA`, `NaN`, `Inf` | `null` |
+| `Date`, `POSIXct` | ISO 8601 strings, UTC |
+| `data.frame` | one object per row |
+
+```{r}
+json_write(list(when = as.Date("2026-09-08"), missing = NA, ratio = Inf))
+```
+
+`?json_parse` and `?json_write` carry the same tables.
+
+## Raw bytes, both directions
+
+A response body arrives as raw bytes and a request body should leave as raw
+bytes. Going through a character string in between would mean an encoding
+round trip that neither side asked for, so the raw path is direct:
+
+```{r}
+body <- json_write_raw(list(q = "cats"))
+body
+
+json_parse(body)
+```
+
+## NDJSON
+
+NDJSON (`application/x-ndjson`) is one JSON value per line — the shape of log
+tails, change feeds and bulk uploads.
+
+```{r}
+json_write_ndjson(data.frame(id = 1:2, ok = c(TRUE, FALSE)))
+
+json_parse_ndjson('{"id":1}\n{"id":2}\n')
+```
+
+`json_write_ndjson_raw()` is the raw-bytes form.
+
+## Safety
+
+Parsing is meant to be pointed at an untrusted response body. yyjson validates
+UTF-8, and nesting beyond 1000 levels is rejected with a structured condition
+rather than walking off the C stack.
+
+Every failure the package raises inherits from `zujson_error`, so one handler
+catches all of them:
+
+```{r}
+tryCatch(json_parse("{bad"), zujson_error = function(e) conditionMessage(e))
+
+class(tryCatch(json_parse("{bad"), zujson_error = function(e) e))
+```
+
+`zujson_info()` reports the build and the vendored yyjson version:
+
+```{r}
+zujson_info()
+```
+
+## What it deliberately does not do
+
+No data frame reconstruction on parse, no matrix or N-d array simplification,
+no incremental streaming yet, no JSON pointer or patch, no custom serializers.
+`v1` is the JSON an HTTP client needs and nothing else.
+
+## Related
+
+`zujson` is part of the `zu*` family:
+[zukomp](https://github.com/pedrobtz/zukomp) for compression,
+[zuxml](https://github.com/pedrobtz/zuxml) for XML,
+[zuyaml](https://github.com/pedrobtz/zuyaml) for YAML, and `zuhttp` for the
+HTTP client that uses them.

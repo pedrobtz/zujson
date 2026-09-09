@@ -140,6 +140,17 @@ json_parse_file <- function(path, simplify = TRUE, data_frame = FALSE) {
   if (!file.exists(path)) {
     zu_abort("zujson_arg_error", paste0("File '", path, "' does not exist."))
   }
+  # A directory is caught here rather than in C because the C layer cannot
+  # classify it portably: fopen() on a directory fails on macOS and Windows,
+  # so yyjson reports a file-open error, but succeeds on glibc, where the size
+  # it then reads back is absurd and yyjson reports a *memory allocation*
+  # failure instead. That is neither of the codes mapped to `zujson_io_error`,
+  # so the same call raised `zujson_io_error` on two platforms and
+  # `zujson_parse_error` on the third.
+  if (dir.exists(path)) {
+    zu_abort("zujson_io_error",
+             paste0("could not read '", path, "': it is a directory."))
+  }
   .Call(C_zujson_parse_file, path, zu_check_simplify(simplify),
         zu_check_flag(data_frame, "data_frame"))
 }

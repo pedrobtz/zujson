@@ -1,5 +1,13 @@
 # zujson (development version)
 
+## Bug fixes
+
+* `json_parse_file()` on a directory now raises `zujson_io_error` on every
+  platform. It already did on macOS and Windows, where `fopen()` refuses a
+  directory; on Linux `fopen()` succeeds, so yyjson failed later with a memory
+  allocation error and the call raised `zujson_parse_error` instead. The path
+  is a directory either way, which is an io problem, not a malformed document.
+
 ## Parsing
 
 * `simplify` gains named modes. `"preserve"` (the default, and what `TRUE`

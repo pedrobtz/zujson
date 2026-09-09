@@ -7,41 +7,13 @@
 # bare error would mean some path bypassed the structured-condition contract
 # that callers handle on.
 #
-# Kept small by default so it costs little on every run; ZUJSON_FUZZ raises the
-# iteration count for the scheduled CI job.
-
-n_iter <- {
-  n <- suppressWarnings(as.integer(Sys.getenv("ZUJSON_FUZZ", "300")))
-  if (is.na(n) || n < 1L) 300L else n
-}
-
-# Every parse must land in exactly one of these two outcomes.
-outcome <- function(expr) {
-  tryCatch({ force(expr); "value" },
-           zujson_error = function(e) "condition",
-           error = function(e) paste0("BARE ERROR: ", conditionMessage(e)),
-           warning = function(w) paste0("WARNING: ", conditionMessage(w)))
-}
-
-random_bytes <- function(n) {
-  paste(rawToChar(as.raw(sample(c(32:126, 9L, 10L, 13L), n, replace = TRUE))),
-        collapse = "")
-}
-
-# Bytes drawn from JSON's own alphabet find structural bugs that uniform random
-# text never reaches: it almost never produces a balanced brace.
-json_soup <- function(n) {
-  alphabet <- c("{", "}", "[", "]", ":", ",", '"', "\\", "/", "-", "+", ".",
-                "e", "E", "0", "1", "9", "t", "r", "u", "e", "f", "a", "l",
-                "s", "n", "i", " ", "\t", "\n", "é", "\\u0000", "\\ud800")
-  paste(sample(alphabet, n, replace = TRUE), collapse = "")
-}
+# The generators and the iteration count live in helper-fuzz.R.
 
 test_that("random bytes never crash and never escape the condition contract", {
   set.seed(20260908)
   bad <- character()
 
-  for (i in seq_len(n_iter)) {
+  for (i in seq_len(fuzz_iters())) {
     src <- if (i %% 2L == 0L) random_bytes(sample(60L, 1L))
            else json_soup(sample(60L, 1L))
     mode <- sample(list(TRUE, FALSE, "coerce"), 1L)[[1]]
@@ -64,7 +36,7 @@ test_that("random bytes never crash and never escape the condition contract", {
 
 test_that("raw and character input agree on every random input", {
   set.seed(1L)
-  for (i in seq_len(min(n_iter, 200L))) {
+  for (i in seq_len(fuzz_iters(200L))) {
     src <- json_soup(sample(40L, 1L))
     # Only ASCII here: the two paths legitimately differ on how a native-encoded
     # string is transcoded, which is not what this is testing.
@@ -90,7 +62,7 @@ test_that("valid JSON built at random survives a round trip", {
     )
   }
 
-  for (i in seq_len(min(n_iter, 200L))) {
+  for (i in seq_len(fuzz_iters(200L))) {
     x <- gen(1L)
     txt <- tryCatch(json_write(x), zujson_error = function(e) NULL)
     if (is.null(txt)) next

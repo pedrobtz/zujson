@@ -26,7 +26,7 @@
 #' otherwise. A `null` inside an array being simplified becomes `NA`; a `null`
 #' anywhere else becomes `NULL`. Strings arrive as UTF-8.
 #'
-# Simplification modes
+#' # Simplification modes
 #'
 #' `simplify` picks what happens to an array whose elements do not share a
 #' kind. The three modes agree everywhere else, including the promotions

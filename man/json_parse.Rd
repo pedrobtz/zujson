@@ -55,7 +55,9 @@ when every element agrees on a type and a list otherwise:\tabular{ll}{
 Numbers become \code{integer} when they fit in R's 32-bit integer and \code{double}
 otherwise. A \code{null} inside an array being simplified becomes \code{NA}; a \code{null}
 anywhere else becomes \code{NULL}. Strings arrive as UTF-8.
+}
 
+\section{Simplification modes}{
 \code{simplify} picks what happens to an array whose elements do not share a
 kind. The three modes agree everywhere else, including the promotions
 \emph{within} the numeric family (\verb{[true, 1]} is \code{c(1L, 1L)} in all of them):\tabular{ll}{

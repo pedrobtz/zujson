@@ -1,0 +1,300 @@
+# Getting started with zujson
+
+``` r
+
+library(zujson)
+```
+
+`zujson` exists to serve `zuhttp`: parsing a response body and building
+a request body are the two things it is designed around. That is why it
+is narrower than `jsonlite`, and why the type mapping below is part of
+the contract rather than an implementation detail — what goes in and
+what comes out should both be predictable.
+
+Ten functions, and that is the whole package.
+
+## Parsing
+
+[`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+accepts a character string or a raw vector;
+[`json_parse_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+and
+[`json_parse_file()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+are the explicit forms, and
+[`json_validate()`](https://pedrobtz.github.io/zujson/reference/json_validate.md)
+answers the question without building anything.
+
+``` r
+
+json_parse('{"ok": true, "ids": [1, 2, 3]}')
+#> $ok
+#> [1] TRUE
+#> 
+#> $ids
+#> [1] 1 2 3
+
+json_validate('{"a": 1}')
+#> [1] TRUE
+json_validate("{bad")
+#> [1] FALSE
+```
+
+JSON objects always become named lists. Arrays become an atomic vector
+when their elements agree on a type and a list when they do not, so the
+type is never coerced away:
+
+``` r
+
+json_parse("[1, 2, 3]")
+#> [1] 1 2 3
+json_parse('[1, "a"]')
+#> [[1]]
+#> [1] 1
+#> 
+#> [[2]]
+#> [1] "a"
+```
+
+The mapping in full:
+
+| JSON                 | R                         |
+|----------------------|---------------------------|
+| `{"a": 1}`           | `list(a = 1L)`            |
+| `[1, 2, 3]`          | `1:3`                     |
+| `[1, "a"]`           | `list(1L, "a")`           |
+| `[]`, `[null, null]` | `logical(0)`, `c(NA, NA)` |
+| `null`               | `NULL`                    |
+
+## Simplification modes
+
+`simplify` decides what happens to an array whose elements do not share
+a kind. That is the *only* thing it changes: the promotions within the
+numeric family are the same in every mode, and a nested container is
+never coerced away.
+
+``` r
+
+json_parse('[1, "a"]')                        # preserve, the default
+#> [[1]]
+#> [1] 1
+#> 
+#> [[2]]
+#> [1] "a"
+json_parse('[1, "a"]', simplify = "coerce")
+#> [1] "1" "a"
+json_parse('[1, "a"]', simplify = "none")
+#> [[1]]
+#> [1] 1
+#> 
+#> [[2]]
+#> [1] "a"
+```
+
+`preserve` keeps the type and gives up the uniform shape, on the view
+that a field which is usually a number and occasionally a string is a
+bug worth seeing rather than one worth papering over. `coerce` is the
+opt-in for callers who would rather have the vector. It follows R’s own
+promotion exactly, so the strings are the ones
+[`as.character()`](https://rdrr.io/r/base/character.html) gives — which
+matters more than it sounds, because a hand-rolled format would not
+agree with R at 15 significant digits:
+
+``` r
+
+json_parse('[0.3333333333333333, "a"]', simplify = "coerce")
+#> [1] "0.333333333333333" "a"
+identical(json_parse('[1, null, "a"]', simplify = "coerce"), c("1", NA, "a"))
+#> [1] TRUE
+```
+
+Note that JSON `null` becomes `NA` there and never the string `"NA"`.
+
+`TRUE` and `FALSE` remain exact synonyms for `"preserve"` and `"none"`,
+so nothing written against the original API changes meaning.
+
+## Data frames
+
+`data_frame = TRUE` turns any non-empty array whose elements are all
+objects — the shape an API uses for a list of records — into a data
+frame.
+
+``` r
+
+json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)
+#>   id nm
+#> 1  1  a
+#> 2  2  b
+```
+
+Records are not required to agree on their keys. Columns are the union,
+in the order first seen, and a record missing a key contributes `NA`, so
+the result is rectangular however ragged the input:
+
+``` r
+
+json_parse('[{"a":1},{"b":2},{"a":3,"c":4}]', data_frame = TRUE)
+#>    a  b  c
+#> 1  1 NA NA
+#> 2 NA  2 NA
+#> 3  3 NA  4
+```
+
+Each column is simplified with the active `simplify` mode, so the two
+features compose rather than competing:
+
+``` r
+
+str(json_parse('[{"v":1},{"v":"x"}]', data_frame = TRUE)$v)
+#> List of 2
+#>  $ : int 1
+#>  $ : chr "x"
+str(json_parse('[{"v":1},{"v":"x"}]', data_frame = TRUE, simplify = "coerce")$v)
+#>  chr [1:2] "1" "x"
+```
+
+Anything that is not a non-empty array of objects is left exactly as it
+was, and the reconstruction applies wherever such an array appears,
+however deeply nested.
+
+``` r
+
+str(json_parse('{"rows":[{"a":1},{"a":2}]}', data_frame = TRUE))
+#> List of 1
+#>  $ rows:'data.frame':    2 obs. of  1 variable:
+#>   ..$ a: int [1:2] 1 2
+```
+
+## Serializing
+
+A **fully named** vector or list becomes an object; anything else
+becomes an array. Length-1 atomic vectors unbox to bare scalars by
+default, so wrap one in [`I()`](https://rdrr.io/r/base/AsIs.html) when a
+field must stay an array.
+
+``` r
+
+json_write(list(a = 1, b = 2))
+#> [1] "{\"a\":1,\"b\":2}"
+json_write(c(a = 1, b = 2))
+#> [1] "{\"a\":1,\"b\":2}"
+json_write(list(1, 2))
+#> [1] "[1,2]"
+
+json_write("x")
+#> [1] "\"x\""
+json_write(I("x"))
+#> [1] "[\"x\"]"
+```
+
+| R                    | JSON                  |
+|----------------------|-----------------------|
+| `list(a = 1, b = 2)` | `{"a":1,"b":2}`       |
+| `c(a = 1, b = 2)`    | `{"a":1,"b":2}`       |
+| `list(1, 2)`         | `[1,2]`               |
+| `"x"` / `I("x")`     | `"x"` / `["x"]`       |
+| `NA`, `NaN`, `Inf`   | `null`                |
+| `Date`, `POSIXct`    | ISO 8601 strings, UTC |
+| `data.frame`         | one object per row    |
+
+``` r
+
+json_write(list(when = as.Date("2026-09-08"), missing = NA, ratio = Inf))
+#> [1] "{\"when\":\"2026-09-08\",\"missing\":null,\"ratio\":null}"
+```
+
+[`?json_parse`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+and
+[`?json_write`](https://pedrobtz.github.io/zujson/reference/json_write.md)
+carry the same tables.
+
+## Raw bytes, both directions
+
+A response body arrives as raw bytes and a request body should leave as
+raw bytes. Going through a character string in between would mean an
+encoding round trip that neither side asked for, so the raw path is
+direct:
+
+``` r
+
+body <- json_write_raw(list(q = "cats"))
+body
+#>  [1] 7b 22 71 22 3a 22 63 61 74 73 22 7d
+
+json_parse(body)
+#> $q
+#> [1] "cats"
+```
+
+## NDJSON
+
+NDJSON (`application/x-ndjson`) is one JSON value per line — the shape
+of log tails, change feeds and bulk uploads.
+
+``` r
+
+json_write_ndjson(data.frame(id = 1:2, ok = c(TRUE, FALSE)))
+#> [1] "{\"id\":1,\"ok\":true}\n{\"id\":2,\"ok\":false}\n"
+
+json_parse_ndjson('{"id":1}\n{"id":2}\n')
+#> [[1]]
+#> [[1]]$id
+#> [1] 1
+#> 
+#> 
+#> [[2]]
+#> [[2]]$id
+#> [1] 2
+```
+
+[`json_write_ndjson_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+is the raw-bytes form.
+
+## Safety
+
+Parsing is meant to be pointed at an untrusted response body. yyjson
+validates UTF-8, and nesting beyond 1000 levels is rejected with a
+structured condition rather than walking off the C stack.
+
+Every failure the package raises inherits from `zujson_error`, so one
+handler catches all of them:
+
+``` r
+
+tryCatch(json_parse("{bad"), zujson_error = function(e) conditionMessage(e))
+#> [1] "invalid JSON at byte 1: unexpected character, expected a string key"
+
+class(tryCatch(json_parse("{bad"), zujson_error = function(e) e))
+#> [1] "zujson_parse_error" "zujson_error"       "error"             
+#> [4] "condition"
+```
+
+[`zujson_info()`](https://pedrobtz.github.io/zujson/reference/zujson_info.md)
+reports the build and the vendored yyjson version:
+
+``` r
+
+zujson_info()
+#> $zujson
+#> [1] "0.1.0"
+#> 
+#> $yyjson
+#> [1] "0.12.0"
+#> 
+#> $max_depth
+#> [1] 1000
+```
+
+## What it deliberately does not do
+
+No matrix or N-d array simplification, no incremental streaming yet, no
+JSON pointer or patch, no custom serializers. Data frame reconstruction
+is opt-in rather than absent, and stays off by default so that the type
+mapping above is what you get unless you ask for something else.
+
+## Related
+
+`zujson` is part of the `zu*` family:
+[zukomp](https://github.com/pedrobtz/zukomp) for compression,
+[zuxml](https://github.com/pedrobtz/zuxml) for XML,
+[zuyaml](https://github.com/pedrobtz/zuyaml) for YAML, and `zuhttp` for
+the HTTP client that uses them.

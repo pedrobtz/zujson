@@ -1,0 +1,75 @@
+# zujson
+
+zujson converts between JSON and ordinary R vectors and lists, using
+vendored [yyjson](https://github.com/ibireme/yyjson) sources, so no
+system JSON library is required. It exists to serve `zuhttp`: parsing a
+response body and building a request body are the two things it is
+designed around, which makes it deliberately narrower than `jsonlite`,
+with a type mapping that is fully documented.
+
+## Installation
+
+Install the development version from GitHub:
+
+``` r
+
+# install.packages("pak")
+pak::pak("pedrobtz/zujson")
+```
+
+## Usage
+
+[`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+turns JSON into R objects. An array becomes an atomic vector when its
+elements agree on a type, and a list when they do not — the type is
+never coerced away.
+
+``` r
+
+library(zujson)
+
+json_parse('{"ok": true, "ids": [1, 2, 3]}')
+#> $ok
+#> [1] TRUE
+#> 
+#> $ids
+#> [1] 1 2 3
+```
+
+[`json_write()`](https://pedrobtz.github.io/zujson/reference/json_write.md)
+goes the other way. A fully named vector or list becomes an object,
+anything else becomes an array.
+
+``` r
+
+json_write(list(query = "cats", limit = 10L))
+#> [1] "{\"query\":\"cats\",\"limit\":10}"
+```
+
+A response body arrives as raw bytes and a request body should leave as
+raw bytes, so both directions take and return them without a detour
+through a string:
+
+``` r
+
+json_write_raw(list(q = "cats"))
+#>  [1] 7b 22 71 22 3a 22 63 61 74 73 22 7d
+
+json_parse(json_write_raw(list(q = "cats")))
+#> $q
+#> [1] "cats"
+```
+
+[`json_parse_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+and
+[`json_write_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+handle `application/x-ndjson`;
+[`json_parse_file()`](https://pedrobtz.github.io/zujson/reference/json_parse.md),
+[`json_parse_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse.md),
+[`json_validate()`](https://pedrobtz.github.io/zujson/reference/json_validate.md)
+and
+[`json_write_ndjson_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+round out the set. The [getting started
+article](https://pedrobtz.github.io/zujson/articles/zujson.html) carries
+the full type mapping in both directions, the safety limits, and what
+the package deliberately does not do.

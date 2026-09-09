@@ -1,0 +1,10 @@
+pandoc: 3.8.3
+pkgdown: 2.2.1
+pkgdown_sha: ~
+articles:
+  articles/kubernetes-openapi: kubernetes-openapi.html
+  articles/zujson: zujson.html
+last_built: 2026-09-09T12:32Z
+urls:
+  reference: https://pedrobtz.github.io/zujson/reference
+  article: https://pedrobtz.github.io/zujson/articles

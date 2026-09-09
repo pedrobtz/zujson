@@ -6,18 +6,24 @@
 \alias{json_parse_file}
 \title{Parse JSON into R}
 \usage{
-json_parse(x, simplify = TRUE)
+json_parse(x, simplify = TRUE, data_frame = FALSE)
 
-json_parse_raw(x, simplify = TRUE)
+json_parse_raw(x, simplify = TRUE, data_frame = FALSE)
 
-json_parse_file(path, simplify = TRUE)
+json_parse_file(path, simplify = TRUE, data_frame = FALSE)
 }
 \arguments{
 \item{x}{For \code{json_parse()}, a single string of JSON text or a raw vector of
 UTF-8 JSON bytes. For \code{json_parse_raw()}, a raw vector.}
 
-\item{simplify}{Whether to simplify JSON arrays to atomic vectors. \code{TRUE}
-(the default) applies the table above; \code{FALSE} makes every array a list.}
+\item{simplify}{How to simplify JSON arrays to atomic vectors: one of
+\code{"preserve"} (the default), \code{"coerce"} or \code{"none"}. \code{TRUE} and \code{FALSE} are
+accepted as synonyms for \code{"preserve"} and \code{"none"}. See \emph{Simplification
+modes} below.}
+
+\item{data_frame}{Whether an array of objects becomes a data frame. \code{FALSE}
+by default, in which case it stays a list of named lists. See \emph{Data
+frames} below.}
 
 \item{path}{Path to a file containing JSON.}
 }
@@ -49,14 +55,37 @@ when every element agrees on a type and a list otherwise:\tabular{ll}{
 Numbers become \code{integer} when they fit in R's 32-bit integer and \code{double}
 otherwise. A \code{null} inside an array being simplified becomes \code{NA}; a \code{null}
 anywhere else becomes \code{NULL}. Strings arrive as UTF-8.
+}
 
-Simplification never coerces across kinds: \verb{[1, "a"]} stays a list rather
-than becoming \code{c("1", "a")}, so a value's type survives the round trip. Set
-\code{simplify = FALSE} to get a list for every array regardless.
+\section{Simplification modes}{
+\code{simplify} picks what happens to an array whose elements do not share a
+kind. The three modes agree everywhere else, including the promotions
+\emph{within} the numeric family (\verb{[true, 1]} is \code{c(1L, 1L)} in all of them):\tabular{ll}{
+   mode \tab \verb{[1, "a"]} becomes \cr
+   \code{"preserve"}, or \code{TRUE} (default) \tab \code{list(1L, "a")} \cr
+   \code{"coerce"} \tab \code{c("1", "a")} \cr
+   \code{"none"}, or \code{FALSE} \tab \code{list(1L, "a")}, and every other array is a list too \cr
+}
 
-Arrays of objects are \emph{not} turned into data frames. Nesting deeper than
-1000 levels is rejected with a \code{zujson_depth_error}, which is what makes the
-parser safe to point at an untrusted response body.
+
+\code{preserve} keeps the type and gives up the uniform shape, on the view that a
+field which is usually a number and occasionally a string is a bug worth
+seeing. \code{coerce} is the opt-in for callers who would rather have the vector:
+it follows R's own promotion, so the strings are exactly what
+\code{as.character()} produces. A nested object or array is never coerced away.
+}
+
+\section{Data frames}{
+\code{data_frame = TRUE} turns any non-empty array whose elements are \emph{all}
+objects into a data frame. Columns are the union of the keys in the order
+first seen; a record missing a key contributes \code{NA}, so the result is
+rectangular however ragged the records are. Each column is then simplified
+with the active \code{simplify} mode, so a column of mixed kinds is a list column
+under \code{preserve} and a character column under \code{coerce}. It applies wherever
+such an array appears, however deeply nested.
+
+Nesting deeper than 1000 levels is rejected with a \code{zujson_depth_error},
+which is what makes the parser safe to point at an untrusted response body.
 
 A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
 forbids emitting one but allows ignoring it, and real APIs emit them.
@@ -80,6 +109,12 @@ json_parse(charToRaw('{"ok": true}'))
 
 # no simplification at all
 json_parse('[1, 2, 3]', simplify = FALSE)
+
+# coerce across kinds instead of keeping the type
+json_parse('[1, "a"]', simplify = "coerce")
+
+# an array of records, as a data frame
+json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)
 
 json_parse_raw(charToRaw('[1, 2, 3]'))
 

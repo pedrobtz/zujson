@@ -16,7 +16,7 @@ The framing that governs every design decision: **zujson is the JSON an HTTP cli
 
 **Phase 2 is design §15**, not more of §14.9: a `coerce` simplification mode, data frame simplification on parse, then a public C API through `LinkingTo: zujson` once a caller actually exists.
 
-- `design-zujson.md` — numbered sections §1–§15 (§5–§6 the type mappings and why they are what they are, §7 the error model, §8 the memory model, §9 depth limiting, §13 NDJSON and the deferred streaming design, §14 acceptance criteria).
+- `.agents/design-zujson.md` — numbered sections §1–§15 (§5–§6 the type mappings and why they are what they are, §7 the error model, §8 the memory model, §9 depth limiting, §13 NDJSON and the deferred streaming design, §14 acceptance criteria).
 
 ## Commands
 
@@ -113,4 +113,4 @@ Deliberately outside testthat, for phase 2: ASan/UBSan and valgrind jobs, `rchk`
 
 ## Definition of done for any change
 
-`devtools::document()` and `devtools::check(cran = TRUE)` clean (0/0/0); `devtools::test(shuffle = TRUE)` green; `gctorture(TRUE)` clean if C changed; new public surface has roxygen docs with runnable examples; any mapping change updated in all three places it is written down (roxygen, `design-zujson.md`, tests).
+`devtools::document()` and `devtools::check(cran = TRUE)` clean (0/0/0); `devtools::test(shuffle = TRUE)` green; `gctorture(TRUE)` clean if C changed; new public surface has roxygen docs with runnable examples; any mapping change updated in all three places it is written down (roxygen, `.agents/design-zujson.md`, tests).

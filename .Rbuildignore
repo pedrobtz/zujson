@@ -4,7 +4,11 @@
 ^\.github$
 ^CLAUDE\.md$
 ^\.agents$
-^design-zujson\.md$
 ^src/.*\.o$
 ^src/.*\.o\.tmp$
 ^src/.*\.(so|dll)$
+^vignettes/articles$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^cran-comments\.md$

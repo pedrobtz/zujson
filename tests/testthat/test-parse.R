@@ -156,6 +156,21 @@ test_that("an unreadable file is an io error, not a parse error", {
   expect_error(json_parse_file(dir), class = "zujson_io_error")
 })
 
+test_that("a file that cannot be opened is an io error too", {
+  # The directory case above is classified in R, because C cannot do it
+  # portably. This one reaches yyjson's own file-open failure, so it is what
+  # keeps the C-side io/parse split honest.
+  skip_on_os("windows")  # permission bits do not deny the owner there
+  if (identical(unname(Sys.info()[["user"]]), "root")) {
+    skip("root ignores the permission bits")
+  }
+  path <- withr::local_tempfile(fileext = ".json")
+  writeLines('{"a": 1}', path)
+  Sys.chmod(path, "000")
+  skip_if(file.access(path, mode = 4L) == 0L, "file is still readable")
+  expect_error(json_parse_file(path), class = "zujson_io_error")
+})
+
 test_that("json_parse_file expands a tilde path", {
   # file.exists() expands ~ and fopen() does not, so without expansion a
   # perfectly readable file reports itself as unreadable

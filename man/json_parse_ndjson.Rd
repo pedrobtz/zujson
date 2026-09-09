@@ -6,7 +6,7 @@
 \alias{json_write_ndjson_raw}
 \title{Parse and write NDJSON}
 \usage{
-json_parse_ndjson(x, simplify = TRUE)
+json_parse_ndjson(x, simplify = TRUE, data_frame = FALSE)
 
 json_write_ndjson(x, auto_unbox = TRUE)
 
@@ -18,6 +18,10 @@ bytes. For the writers, a list of records or a data frame — a data frame is
 written one object per row, which is the shape NDJSON exists for.}
 
 \item{simplify}{Passed through to \code{\link[=json_parse]{json_parse()}} for each record.}
+
+\item{data_frame}{Passed through to \code{\link[=json_parse]{json_parse()}} for each record. Note
+that records are parsed one at a time, so this turns an array \emph{inside} a
+record into a data frame; it does not make a frame out of the stream.}
 
 \item{auto_unbox}{Passed through to \code{\link[=json_write]{json_write()}} for each record.}
 }

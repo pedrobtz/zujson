@@ -23,6 +23,7 @@ Roxygen: list(markdown = TRUE)
 Imports: 
     utils
 Suggests: 
+    jsonlite,
     knitr,
     rmarkdown,
     testthat (>= 3.2.0),

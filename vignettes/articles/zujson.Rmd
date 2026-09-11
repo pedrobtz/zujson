@@ -291,8 +291,36 @@ mapping small enough to hold in your head, not an oversight, and all of it is
 pinned in the package's own tests --- which use `jsonlite` as an oracle over
 JSON text, so a divergence that stops being deliberate fails the suite.
 
-```{r}
+Every cell in the tables below is computed by running both packages when this
+page is built, so none of it can quietly go stale.
+
+```{r include = FALSE}
 library(jsonlite)
+
+# One compact line per R value. Data frames and matrices are rebuilt as the
+# call that would make them, which is shorter than deparsing the attributes
+# and still says exactly what came back.
+fmt <- function(x) {
+  if (is.data.frame(x)) {
+    cols <- vapply(x, function(col) paste(deparse(col), collapse = ""), "")
+    return(sprintf("data.frame(%s)",
+                   paste(names(x), cols, sep = " = ", collapse = ", ")))
+  }
+  if (is.matrix(x)) {
+    return(sprintf("matrix(%s, nrow = %d)",
+                   paste(deparse(as.vector(x)), collapse = ""), nrow(x)))
+  }
+  paste(deparse(x, width.cutoff = 500), collapse = " ")
+}
+code <- function(x) paste0("`", x, "`")
+
+# Evaluating the same expression that gets printed as the label is what keeps
+# the two columns honest: there is no second copy to fall out of step.
+run <- function(e, f) {
+  tryCatch(f(eval(e)), zujson_error = function(c) paste0("error: ", class(c)[1]),
+           error = function(c) paste0("error: ", class(c)[1]))
+}
+label <- function(e) paste(deparse(e), collapse = "")
 ```
 
 ### Parsing
@@ -301,119 +329,100 @@ Most JSON reads the same way in both: objects, nulls, scalars, escapes,
 surrogate pairs and the integer boundaries all agree. Four things do not, and
 three of them have an opt-in that closes the gap.
 
-An empty array has no elements to take a type from, so it is the zero-length
-atomic vector rather than a list:
-
-```{r}
-json_parse("[]")
-fromJSON("[]")
+```{r echo = FALSE}
+js <- c("[]", '[1, "a"]', '[{"a":1},{"b":2}]', "[[1,2],[3,4]]")
+knitr::kable(data.frame(
+  JSON = code(js),
+  zujson = code(vapply(js, function(j) fmt(json_parse(j)), "")),
+  jsonlite = code(vapply(js, function(j) fmt(fromJSON(j)), "")),
+  `Opt-in that agrees` = c("none needed --- see below",
+                           '`simplify = "coerce"`',
+                           "`data_frame = TRUE`",
+                           "none; no matrix detection"),
+  check.names = FALSE, row.names = NULL
+), row.names = FALSE)
 ```
 
-A mixed-kind array keeps its types unless you ask for the vector:
-
-```{r}
-json_parse('[1, "a"]')
-json_parse('[1, "a"]', simplify = "coerce") # agrees with jsonlite
-fromJSON('[1, "a"]')
-```
-
-An array of objects stays a list of records unless you ask for the frame:
-
-```{r}
-str(json_parse('[{"a":1},{"b":2}]'))
-json_parse('[{"a":1},{"b":2}]', data_frame = TRUE) # agrees with jsonlite
-```
-
-An array of equal-length arrays is a list of rows in *every* mode. There is no
-matrix detection here, so this is the one that does not converge:
-
-```{r}
-json_parse("[[1,2],[3,4]]")
-fromJSON("[[1,2],[3,4]]")
-```
+The empty array is the one with no opt-in and no argument about it: with no
+elements to take a type from, the zero-length atomic vector is as good an
+answer as the empty list, and this package prefers the one that keeps `[]` and
+`[1,2]` in the same family.
 
 ### Serializing
 
 This is where the two differ most, because `toJSON()` has a dozen arguments
 shaping its output and `json_write()` has two.
 
-Start with the return types, which is why the outputs below print differently:
-`json_write()` gives you a plain character string, so R shows it with its
-quotes escaped, while `toJSON()` gives you a classed `json` object that prints
-bare. Read through the escaping when comparing the two.
-
-The unboxing defaults are opposite --- `json_write()` unboxes a length-1
-vector, `toJSON()` does not:
-
-```{r}
-json_write(35)
-toJSON(35)
+```{r echo = FALSE}
+es <- list(
+  quote(35),
+  quote(c(a = 1, b = 2)),
+  quote(c(1, NA, Inf)),
+  quote(pi),
+  quote(NULL),
+  quote(as.POSIXct("2013-06-17 22:33:44", tz = "UTC")),
+  quote(matrix(1:4, 2)),
+  quote(complex(real = 2, imaginary = 2)),
+  quote(charToRaw("bla")),
+  quote(as.POSIXlt("2013-06-17 22:33:44", tz = "UTC"))
+)
+knitr::kable(data.frame(
+  `R value` = code(vapply(es, label, "")),
+  zujson = code(vapply(es, run, "", f = json_write)),
+  `jsonlite, at its defaults` =
+    code(vapply(es, run, "", f = function(x) as.character(toJSON(x)))),
+  check.names = FALSE, row.names = NULL
+), row.names = FALSE)
 ```
 
-A named atomic vector is an object here and an array there. This one has no
-argument that reconciles it: `toJSON()` drops vector names unless asked with
-`keep_vec_names`, which it also warns about.
+Four of those are worth a sentence.
 
-```{r}
-json_write(c(a = 1, b = 2))
-toJSON(c(a = 1, b = 2))
-```
+The unboxing defaults are **opposite**: `json_write()` unboxes a length-1
+vector and `toJSON()` does not, which is the first thing to trip over when
+porting code. A **named atomic vector** is an object here and an array there,
+and this is the one with no argument that reconciles it --- `toJSON()` drops
+vector names unless asked with `keep_vec_names`, which it also warns about.
+Every **missing or non-finite** value is `null` here, where `toJSON()`'s
+default makes a numeric `NA` the *string* `"NA"` while a character or logical
+`NA` becomes `null`. And **doubles** are written so they read back as the same
+number, rather than rounded to four digits.
 
-Every missing or non-finite value is `null`, where `toJSON()`'s default turns a
-numeric `NA` into the *string* `"NA"` --- though a character or logical `NA`
-becomes `null`, so the rule is worth knowing before you rely on it:
-
-```{r}
-json_write(c(1, NA, Inf))
-toJSON(c(1, NA, Inf))
-```
-
-Doubles are written so they read back as the same number. `toJSON()` rounds to
-four digits unless told otherwise:
-
-```{r}
-json_write(pi)
-toJSON(pi)
-```
-
-The rest, in brief:
-
-| R value | zujson | jsonlite, at its defaults |
-| --- | --- | --- |
-| `NULL` | `null` | `{}` |
-| `POSIXct` | ISO 8601, always UTC | space-separated, local time |
-| `matrix(1:4, 2)` | `[1,2,3,4]`, `dim` dropped | `[[1,3],[2,4]]` |
-| `complex`, `raw`, `POSIXlt` | `zujson_unsupported_type` | `"2+2i"`, `"Ymxh"`, a string |
-| a data frame column that is itself a data frame | `zujson_unsupported_type` | nested objects |
+The refusals at the bottom of the table are deliberate: a complex number, a
+raw vector and a `POSIXlt` have no obvious JSON form, so they raise
+`zujson_unsupported_type` instead of being guessed at. A data frame column that
+is itself a data frame is refused for the same reason. `POSIXct` is always UTC,
+which is the same instant whatever `tzone` says.
 
 ### Failing
 
-The divergence that matters most to a client. Every failure here is a typed
+The divergence that matters most to a client: every failure here is a typed
 condition rather than a bare `simpleError`, so one handler catches the lot and
-can tell the cases apart:
+can still tell the cases apart.
 
-```{r}
-class(tryCatch(json_parse("{bad"), error = function(e) e))
-class(tryCatch(fromJSON("{bad"), error = function(e) e))
-```
-
-Two inputs are refused on purpose. An escaped NUL is valid JSON that no R
-string can hold, so `json_parse()` raises; `fromJSON()` silently returns a
-truncated string instead:
-
-```{r}
+```{r echo = FALSE}
+cls <- function(e) paste(class(tryCatch(eval(e), error = function(c) c))[1])
+deep <- paste0(strrep("[", 1500), strrep("]", 1500))
 nul <- '["a\\u0000b"]'
-tryCatch(json_parse(nul), zujson_error = function(e) conditionMessage(e))
-fromJSON(nul)
+knitr::kable(data.frame(
+  Input = c("`\"{bad\"`", "an escaped NUL, `\"\\u0000\"`",
+            "nesting 1500 deep", "a URL or file path"),
+  zujson = c(code(cls(quote(json_parse("{bad")))),
+             code(cls(quote(json_parse(nul)))),
+             code(cls(quote(json_parse(deep)))),
+             "never read; `json_parse_file()` is explicit"),
+  jsonlite = c(code(cls(quote(fromJSON("{bad")))),
+               paste0("silently truncates to ", code(fromJSON(nul))),
+               "C stack overflow",
+               "fetched or read"),
+  check.names = FALSE, row.names = NULL
+), row.names = FALSE)
 ```
 
-And nesting past 1000 levels is a `zujson_depth_error` rather than a C stack
-overflow --- which is what makes the parser safe to point at a body you did not
-write.
-
-Finally, `json_parse()` never performs I/O. `fromJSON()` inspects its argument
-and will fetch a URL or read a file path if it looks like one; here reading a
-file is `json_parse_file()`, and it is always explicit.
+The middle two are the ones to notice. An escaped NUL is valid JSON that no R
+string can hold, so refusing it is the only honest answer --- returning a
+silently shortened string loses data without saying so. And the depth cap turns
+what would be a C stack overflow into a condition you can catch, which is what
+makes the parser safe to point at a body you did not write.
 
 ## Related
 

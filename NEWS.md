@@ -1,6 +1,18 @@
-# zujson (development version)
+# zujson 0.0.0.9000 (development version)
+
+Nothing has been released yet, so everything below is unreleased, newest work
+first. The mappings may still change if the design argues for it.
 
 ## Bug fixes
+
+* A number too large for any finite `double` now parses as `Inf` instead of
+  failing the whole read. RFC 8259 puts no limit on the magnitude of a number,
+  so `1e309` is valid JSON, and rejecting it let one absurd value anywhere in
+  a response body make the entire body unparseable. The value is the one
+  `as.numeric()` gives the same token, so an integer wider than `int64` reads
+  as the nearest double. `json_validate("1e309")` is `TRUE` for the same
+  reason. The bare literals `Infinity`, `-Infinity` and `NaN` are not JSON and
+  are still rejected.
 
 * `json_parse_file()` on a directory now raises `zujson_io_error` on every
   platform. It already did on macOS and Windows, where `fopen()` refuses a
@@ -25,6 +37,14 @@
 
 ## Infrastructure
 
+* Differential tests against `jsonlite`, in `tests/testthat/test-interop-jsonlite.R`.
+  Two tables over JSON text: where the two packages agree, and a divergence
+  table pinning the places they are meant not to — `[]` is `logical(0)`,
+  `preserve` keeps `[1, "a"]` a list, there is no matrix detection, and data
+  frames are opt-in. The second table is the useful one: it fails if a change
+  quietly makes this package more `jsonlite`-like than the documented mapping
+  says. `jsonlite` is a suggested package and the tests skip without it.
+
 * Sanitizer and randomised-input CI. `tools/sanitizer-exercise.R` drives the C
   layer using nothing but base R, with most of its effort on the error paths,
   where an R error longjmps past the explicit free; `hardening.yaml` runs it
@@ -32,9 +52,9 @@
   `tests/testthat/test-fuzz.R` runs a smaller version of the same idea on every
   test run.
 
-# zujson 0.1.0
+## Initial feature set
 
-First release.
+The v1 work, previously labelled 0.1.0 — a version number, not a release.
 
 * `json_parse()`, `json_parse_raw()` and `json_parse_file()` turn JSON into R
   vectors and lists. Arrays simplify to atomic vectors only when their elements

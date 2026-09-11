@@ -192,6 +192,91 @@ class(tryCatch(json_parse("{bad"), zujson_error = function(e) e))
 zujson_info()
 ```
 
+## Conformance
+
+Claims about what a parser rejects are worth little without an external
+check, so the package is run against
+[JSONTestSuite](https://github.com/nst/JSONTestSuite) --- the standard
+corpus for exactly this question. Its files are named by what a parser must
+do: `y_` must be accepted, `n_` must be rejected, and `i_` is left to the
+implementation.
+
+```{r eval = FALSE}
+# tools/jsontestsuite.R, against a pinned upstream commit
+y_ must be accepted           95 files,   0 wrong
+n_ must be rejected          188 files,   0 wrong
+i_ implementation-defined     35 files,  12 accepted,  23 rejected
+318 parsing files, 0 wrong
+```
+
+Every file is handed to `json_validate()` as **raw bytes**. Reading them as
+text would be wrong twice over: the suite is full of deliberately invalid
+UTF-8, which a text read mangles, and of embedded NULs, which no R string can
+carry. Bytes are also what a response body actually is.
+
+### The implementation-defined cases
+
+The 35 `i_` files are where conforming parsers legitimately disagree, so they
+are the interesting ones. The answers here follow a single split: **generous
+about numbers, strict about text.**
+
+A number outside what a `double` can hold still has a well-defined nearest
+value, and R's own reader already agrees what it is --- so the document is
+read and the number is converted. Refusing the whole body over one absurd
+value would be a wildly disproportionate failure for an HTTP client.
+
+```{r}
+json_parse("[123123e100000]")   # overflows: Inf, as as.numeric() gives
+json_parse("[123e-10000000]")   # underflows: 0
+json_parse("[100000000000000000000]") # wider than int64: nearest double
+```
+
+That covers ten of the twelve acceptances: five overflow to `±Inf`, two
+underflow to `0`, and three are integers too wide for `int64`.
+
+Text is the opposite. Every string that comes back is marked as UTF-8, and
+that mark is only honest because yyjson validated the bytes. Accepting
+malformed text would mean handing back an R string that claims an encoding it
+does not have --- so all 23 rejections are text that is not valid UTF-8,
+in three groups.
+
+Eleven involve surrogates that do not form a valid pair --- ten written as
+`\uXXXX` escapes, one encoded straight into the bytes. A surrogate is only
+meaningful as half of a pair, and an unpaired one encodes no character:
+
+```{r}
+json_validate('["\\ud800"]')        # lone high surrogate
+json_validate('["\\uDd1e\\uD834"]') # a valid pair, inverted
+json_validate('["\\ud83d\\ude02"]') # a correct pair: fine
+```
+
+Nine are invalid UTF-8 byte sequences --- truncated characters, overlong
+encodings, stray continuation bytes, Latin-1 text mislabelled as JSON:
+
+```{r}
+json_validate(as.raw(c(0x22, 0xC0, 0xAF, 0x22))) # overlong encoding of "/"
+json_validate(as.raw(c(0x22, 0xE9, 0x22)))       # Latin-1 e-acute, not UTF-8
+```
+
+The last three are UTF-16, with and without a byte order mark. RFC 8259 is
+explicit that JSON exchanged between systems is UTF-8, so these are not JSON
+this package reads; convert with `iconv()` first if you have one.
+
+```{r}
+json_validate(as.raw(c(0xFF, 0xFE, 0x22, 0x00, 0x61, 0x00, 0x22, 0x00)))
+```
+
+The remaining two acceptances are structural rather than textual. 500 nested
+arrays are fine, because the depth cap is 1000 --- the cap exists to protect
+the C stack, not to second-guess the sender. And a UTF-8 byte order mark is
+skipped rather than rejected, because RFC 8259 forbids *emitting* one but
+allows ignoring it, and real APIs emit them anyway.
+
+```{r}
+json_validate(paste0(strrep("[", 500), strrep("]", 500)))
+json_parse(as.raw(c(0xEF, 0xBB, 0xBF, 0x7B, 0x7D)))  # BOM, then {}
+```
+
 ## What it deliberately does not do
 
 No matrix or N-d array simplification, no incremental streaming yet, no JSON

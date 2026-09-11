@@ -23,7 +23,10 @@
 #' | `null` | `NULL` |
 #'
 #' Numbers become `integer` when they fit in R's 32-bit integer and `double`
-#' otherwise. A `null` inside an array being simplified becomes `NA`; a `null`
+#' otherwise. A number too large for any finite `double` becomes `Inf` rather
+#' than an error: RFC 8259 sets no limit on the magnitude of a number, so
+#' `1e309` is valid JSON, and the value is the one `as.numeric()` gives the
+#' same token. A `null` inside an array being simplified becomes `NA`; a `null`
 #' anywhere else becomes `NULL`. Strings arrive as UTF-8.
 #'
 #' # Simplification modes
@@ -58,7 +61,10 @@
 #' which is what makes the parser safe to point at an untrusted response body.
 #'
 #' A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
-#' forbids emitting one but allows ignoring it, and real APIs emit them.
+#' forbids emitting one but allows ignoring it, and real APIs emit them. The
+#' bare literals `Infinity`, `-Infinity` and `NaN` are not JSON and stay
+#' rejected, which is a separate question from the magnitude of a number that
+#' *is* written as one.
 #'
 #' Two things that are valid JSON still cannot become R values, and both raise
 #' `zujson_parse_error` rather than a bare error: a string or key containing an
@@ -97,6 +103,9 @@
 #'
 #' # coerce across kinds instead of keeping the type
 #' json_parse('[1, "a"]', simplify = "coerce")
+#'
+#' # a number past the range of a double is Inf, not a parse failure
+#' json_parse("[1e309]")
 #'
 #' # an array of records, as a data frame
 #' json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)

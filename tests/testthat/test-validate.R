@@ -14,8 +14,21 @@ test_that("json_validate accepts raw bytes", {
   expect_false(json_validate(raw()))
 })
 
+test_that("an out-of-range number is valid JSON and says so", {
+  # the read flags are shared, so this is really asserting that the reader
+  # does not reject a document over a number it cannot hold as a double
+  expect_true(json_validate("1e309"))
+  expect_true(json_validate("[-1e309, 1]"))
+  # the literals that are not JSON stay invalid: we do not allow inf/nan
+  expect_false(json_validate("[Infinity]"))
+  expect_false(json_validate("[-Infinity]"))
+  expect_false(json_validate("[NaN]"))
+  expect_false(json_validate("[inf]"))
+})
+
 test_that("json_validate agrees with json_parse", {
-  for (s in c('{"a":1}', "[]", "null", "{", "", "[1,]", '{"a"}')) {
+  for (s in c('{"a":1}', "[]", "null", "{", "", "[1,]", '{"a"}',
+              "1e309", "[1e309]", "[Infinity]", "[NaN]")) {
     parsed <- tryCatch({ json_parse(s); TRUE }, zujson_error = function(e) FALSE)
     expect_identical(json_validate(s), parsed)
   }

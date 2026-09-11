@@ -122,6 +122,31 @@ R's `integer` is 32-bit and `NA_INTEGER` *is* `INT_MIN`, so:
 - a genuine `-2147483648` also promotes to `double`, since keeping it an
   integer would make it indistinguishable from `NA`.
 
+### Numbers past the range of a double
+
+RFC 8259 sets no limit on the magnitude of a number, so `1e309` is valid JSON
+even though no finite `double` holds it. yyjson's default is to fail the whole
+read on such a token, which would mean one absurd value anywhere in a response
+body makes the body unparseable — the wrong failure mode for the use case this
+package exists to serve, and a divergence from `jsonlite`, which returns `Inf`.
+
+`ZUJSON_READ_FLAGS` therefore carries `YYJSON_READ_BIGNUM_AS_RAW`: the token
+arrives as `YYJSON_TYPE_RAW` and `zu_raw_dbl()` converts it with `R_strtod()`,
+giving exactly what `as.numeric()` gives the same text — `Inf` here, and the
+nearest double for an integer wider than int64. From there it is an ordinary
+double and the lattice treats it like any other.
+
+Two things this is deliberately *not*:
+
+- not `YYJSON_READ_ALLOW_INF_AND_NAN`, which also accepts the bare literals
+  `Infinity` and `NaN`. Those are not JSON, and since `json_validate()` shares
+  the flag set it would start calling such documents valid.
+- not `strtod()`, which reads the decimal point in the current C locale: under
+  a comma-decimal locale it would stop at the `.` of `1.5e400` and return `1`.
+
+Because the flag is shared, `json_validate("1e309")` is now `TRUE`, which it
+should always have been.
+
 ### Resolved open questions
 
 These were the questions left open in the earlier `jsx3` notes. v1's answers:

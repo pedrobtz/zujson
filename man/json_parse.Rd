@@ -53,7 +53,10 @@ when every element agrees on a type and a list otherwise:\tabular{ll}{
 
 
 Numbers become \code{integer} when they fit in R's 32-bit integer and \code{double}
-otherwise. A \code{null} inside an array being simplified becomes \code{NA}; a \code{null}
+otherwise. A number too large for any finite \code{double} becomes \code{Inf} rather
+than an error: RFC 8259 sets no limit on the magnitude of a number, so
+\code{1e309} is valid JSON, and the value is the one \code{as.numeric()} gives the
+same token. A \code{null} inside an array being simplified becomes \code{NA}; a \code{null}
 anywhere else becomes \code{NULL}. Strings arrive as UTF-8.
 }
 
@@ -88,7 +91,10 @@ Nesting deeper than 1000 levels is rejected with a \code{zujson_depth_error},
 which is what makes the parser safe to point at an untrusted response body.
 
 A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
-forbids emitting one but allows ignoring it, and real APIs emit them.
+forbids emitting one but allows ignoring it, and real APIs emit them. The
+bare literals \code{Infinity}, \code{-Infinity} and \code{NaN} are not JSON and stay
+rejected, which is a separate question from the magnitude of a number that
+\emph{is} written as one.
 
 Two things that are valid JSON still cannot become R values, and both raise
 \code{zujson_parse_error} rather than a bare error: a string or key containing an
@@ -112,6 +118,9 @@ json_parse('[1, 2, 3]', simplify = FALSE)
 
 # coerce across kinds instead of keeping the type
 json_parse('[1, "a"]', simplify = "coerce")
+
+# a number past the range of a double is Inf, not a parse failure
+json_parse("[1e309]")
 
 # an array of records, as a data frame
 json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)

@@ -171,20 +171,37 @@ These were the questions left open in the earlier `jsx3` notes. v1's answers:
 
 ### Valid JSON that R cannot hold
 
-Three documents are valid JSON and still cannot become R values: a string or
-key containing `\u0000` (no R string holds a NUL), one longer than `INT_MAX`
-bytes, and anything nested past the depth cap. All three raise
-`zujson_parse_error`, because a caller handling `zujson_error` must not be
-surprised by a bare `simpleError` from the R internals — which is exactly what
-`Rf_mkCharLenCE` raises if a NUL reaches it. Both guards live in `zu_mkchar()`,
-the single place a CHARSXP is made, so string values and object keys cannot
-drift apart.
+Three documents are valid JSON and still cannot become R values, in two
+groups that fail differently.
 
-This makes `json_validate()` and `json_parse()` disagree on precisely one
-input. The NUL escape is valid JSON, so `json_validate()` says `TRUE`, and
-`json_parse()` still fails; both answers are right for the questions they are
-asked. `?json_validate` documents the divergence and points callers who must
-not fail at handling the condition rather than pre-screening.
+A string or key containing `\u0000` (no R string holds a NUL) and one longer
+than `INT_MAX` bytes both raise `zujson_parse_error`. Both guards live in
+`zu_mkchar()`, the single place a CHARSXP is made, so string values and object
+keys cannot drift apart. Raising our own condition matters because a caller
+handling `zujson_error` must not be surprised by a bare `simpleError` from the
+R internals — which is exactly what `Rf_mkCharLenCE` raises if a NUL reaches
+it.
+
+Anything nested past the depth cap raises `zujson_depth_error` instead, and is
+a different problem: the bytes are fine, and it is our recursive tree builder
+that cannot take them.
+
+So `json_validate()` and `json_parse()` disagree on **two** classes of input,
+not one — strings R cannot hold, and documents deeper than the cap. Both are
+valid JSON, so `json_validate()` says `TRUE` and `json_parse()` still fails;
+each answer is right for the question it is asked, because validation is about
+the bytes and parsing is about what R can hold.
+
+Do **not** close the gap by teaching `json_validate()` the depth cap. Nothing
+unsafe happens there: yyjson's reader is iterative and has no notion of depth
+at all, so a million nested arrays validate in milliseconds without touching
+the C stack. The cap exists to protect the *tree builder*, which validation
+never runs. Enforcing it would mean walking the parsed document on every call
+— validation is currently around five times cheaper than parsing, and that is
+its whole reason to exist as a separate function — in order to return `FALSE`
+for something RFC 8259 §9 says is valid JSON. `?json_validate` documents both
+divergences and points callers who must not fail at handling the condition
+rather than pre-screening.
 
 A leading UTF-8 BOM is **ignored**, via one shared flag set (`ZUJSON_READ_FLAGS`)
 used by every read path so parse and validate cannot drift apart. RFC 8259

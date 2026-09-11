@@ -96,12 +96,13 @@ bare literals \code{Infinity}, \code{-Infinity} and \code{NaN} are not JSON and 
 rejected, which is a separate question from the magnitude of a number that
 \emph{is} written as one.
 
-Two things that are valid JSON still cannot become R values, and both raise
-\code{zujson_parse_error} rather than a bare error: a string or key containing an
-escaped NUL (\verb{\\u0000}), which no R string can hold, and one longer than
-\code{.Machine$integer.max} bytes. \code{json_parse_file()} additionally raises
-\code{zujson_io_error} when the file cannot be read at all, which is a different
-problem from its contents not being JSON.
+Two \emph{further} things are valid JSON and still cannot become R values, and
+both raise \code{zujson_parse_error} rather than a bare error, so a caller
+handling \code{zujson_error} catches them alongside everything else: a string or
+key containing an escaped NUL (\verb{\\u0000}), which no R string can hold, and
+one longer than \code{.Machine$integer.max} bytes. \code{json_parse_file()}
+additionally raises \code{zujson_io_error} when the file cannot be read at all,
+which is a different problem from its contents not being JSON.
 }
 
 \examples{

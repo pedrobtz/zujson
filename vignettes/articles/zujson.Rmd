@@ -177,6 +177,26 @@ Parsing is meant to be pointed at an untrusted response body. yyjson validates
 UTF-8, and nesting beyond 1000 levels is rejected with a structured condition
 rather than walking off the C stack.
 
+`json_validate()` does **not** apply that cap, and deliberately: RFC 8259
+leaves any depth limit to the implementation, so a deeply nested document is
+still valid JSON, and the reader underneath is iterative --- a million nested
+arrays validate in milliseconds without touching the C stack. The cap protects
+the recursive step that builds the R value, which validation never reaches. So
+the two can differ:
+
+```{r}
+deep <- paste0(strrep("[", 1500), strrep("]", 1500))
+
+json_validate(deep)
+class(tryCatch(json_parse(deep), error = function(e) e))
+```
+
+That is the second of exactly two cases where a document passes
+`json_validate()` and still fails `json_parse()`; the other is a string R
+cannot hold, such as one containing an escaped NUL. Both are listed in
+`?json_validate`, and both are why code that must not fail should handle the
+condition from `json_parse()` rather than pre-screening.
+
 Every failure the package raises inherits from `zujson_error`, so one handler
 catches all of them:
 

@@ -45,6 +45,14 @@ first. The mappings may still change if the design argues for it.
   quietly makes this package more `jsonlite`-like than the documented mapping
   says. `jsonlite` is a suggested package and the tests skip without it.
 
+* Conformance against `nst/JSONTestSuite`, in `tools/jsontestsuite.R`. Every
+  file is handed to `json_validate()` as raw bytes — the suite is full of
+  deliberately invalid UTF-8 and embedded NULs, which a text read would mangle.
+  The package accepts all 95 files it must accept and rejects all 188 it must
+  reject; of the 35 implementation-defined files it accepts 12, the rejections
+  being invalid UTF-8 and lone surrogates. The script pins an upstream commit
+  so the result cannot drift under it, and needs the network only once.
+
 * Sanitizer and randomised-input CI. `tools/sanitizer-exercise.R` drives the C
   layer using nothing but base R, with most of its effort on the error paths,
   where an R error longjmps past the explicit free; `hardening.yaml` runs it

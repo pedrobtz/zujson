@@ -32,7 +32,10 @@ Rscript -e 'devtools::test(shuffle = TRUE)'           # required before calling 
 Rscript -e 'devtools::check(cran = TRUE)'             # target: 0 errors, 0 warnings, 0 notes
 Rscript -e 'devtools::test(filter = "write")'         # tests/testthat/test-write.R
 Rscript tools/sanitizer-exercise.R                    # base R only; what hardening.yaml runs
+Rscript tools/jsontestsuite.R                         # nst/JSONTestSuite conformance; needs network once
 ```
+
+Both `tools/` scripts call `library(zujson)`, so they run against an **installed** package, not `load_all()`. `JSONTESTSUITE_DIR=<checkout>` skips the download.
 
 Offline, `check()` emits a spurious `checking for future file timestamps ... NOTE`. Suppress it to see the real result:
 
@@ -117,6 +120,8 @@ NDJSON lives in `zu_parse.c` and `zu_write.c` next to the single-document code r
 - **CRAN budget: the suite finishes in a few seconds.** Keep it there.
 
 Outside testthat, and now real: `.github/workflows/hardening.yaml` runs `tools/sanitizer-exercise.R` under clang-asan, clang-ubsan and gcc-asan and fuzzes the parser through the R API. That script uses nothing but base R and spends most of its effort on the error paths, where an R error longjmps past the explicit free — so **a new C error path belongs in it as well as in testthat.** `test-fuzz.R` runs a smaller version of the same idea on every test run.
+
+**External conformance is `tools/jsontestsuite.R`**, against a pinned commit of `nst/JSONTestSuite`: 95/95 must-accept and 188/188 must-reject, with the implementation-defined set at 12 accepted / 23 rejected (all 23 invalid UTF-8 or lone surrogates, which yyjson refuses because validation is on). That `i_` count is recorded in the script as a baseline and flagged when it moves, because moving it is how you tell a read-flag change apart from a conformance regression — enabling `BIGNUM_AS_RAW` moved exactly five `i_` files and no `y_`/`n_` answer. The script also re-derives the `json_parse()`/`json_validate()` divergence from the outside and finds exactly the two NUL-escape files, which is independent confirmation of the `zu_mkchar()` invariant above.
 
 Still missing: valgrind, and `rchk` for PROTECT discipline. Until those exist, `gctorture(TRUE)` over both directions is the check that a change to the C layer has to pass, and it is still required by the definition of done below — the sanitizers run in CI, after the fact.
 

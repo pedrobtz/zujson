@@ -19,12 +19,23 @@ worth parsing; use \code{\link[=json_parse]{json_parse()}} when a failure should
 read.
 }
 \details{
-This answers "is this valid JSON", which is very nearly but not exactly "will
-\code{\link[=json_parse]{json_parse()}} succeed". The one input where they differ is a string or key
-containing an escaped NUL (\verb{\\u0000}): that is valid JSON, so this returns
-\code{TRUE}, but no R string can hold the result, so \code{json_parse()} raises
-\code{zujson_parse_error}. Code that must not fail should handle the condition
-from \code{json_parse()} rather than pre-screening with this.
+This answers "is this valid JSON", which is very nearly but not exactly
+"will \code{\link[=json_parse]{json_parse()}} succeed". The two come apart on JSON that is valid and
+still cannot become an R value, of which there are two kinds:
+\itemize{
+\item a string or key R cannot hold: one containing an escaped NUL (\verb{\\u0000}),
+or one longer than \code{.Machine$integer.max} bytes. \code{json_parse()} raises
+\code{zujson_parse_error}.
+\item nesting deeper than 1000 levels. RFC 8259 leaves any depth limit to the
+implementation, so such a document is still valid JSON. \code{json_parse()}
+raises \code{zujson_depth_error}, because its recursive tree builder has a C
+stack to protect; the reader underneath it is iterative and does not.
+}
+
+This function returns \code{TRUE} for both, and is right to: it is asked whether
+the bytes are JSON, not whether this package can materialise them. Code that
+must not fail should handle the condition from \code{json_parse()} rather than
+pre-screening with this.
 }
 \examples{
 json_validate('{"a": 1}')

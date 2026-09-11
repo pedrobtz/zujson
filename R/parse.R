@@ -23,7 +23,10 @@
 #' | `null` | `NULL` |
 #'
 #' Numbers become `integer` when they fit in R's 32-bit integer and `double`
-#' otherwise. A `null` inside an array being simplified becomes `NA`; a `null`
+#' otherwise. A number too large for any finite `double` becomes `Inf` rather
+#' than an error: RFC 8259 sets no limit on the magnitude of a number, so
+#' `1e309` is valid JSON, and the value is the one `as.numeric()` gives the
+#' same token. A `null` inside an array being simplified becomes `NA`; a `null`
 #' anywhere else becomes `NULL`. Strings arrive as UTF-8.
 #'
 #' # Simplification modes
@@ -58,14 +61,18 @@
 #' which is what makes the parser safe to point at an untrusted response body.
 #'
 #' A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
-#' forbids emitting one but allows ignoring it, and real APIs emit them.
+#' forbids emitting one but allows ignoring it, and real APIs emit them. The
+#' bare literals `Infinity`, `-Infinity` and `NaN` are not JSON and stay
+#' rejected, which is a separate question from the magnitude of a number that
+#' *is* written as one.
 #'
-#' Two things that are valid JSON still cannot become R values, and both raise
-#' `zujson_parse_error` rather than a bare error: a string or key containing an
-#' escaped NUL (`\u0000`), which no R string can hold, and one longer than
-#' `.Machine$integer.max` bytes. `json_parse_file()` additionally raises
-#' `zujson_io_error` when the file cannot be read at all, which is a different
-#' problem from its contents not being JSON.
+#' Two *further* things are valid JSON and still cannot become R values, and
+#' both raise `zujson_parse_error` rather than a bare error, so a caller
+#' handling `zujson_error` catches them alongside everything else: a string or
+#' key containing an escaped NUL (`\u0000`), which no R string can hold, and
+#' one longer than `.Machine$integer.max` bytes. `json_parse_file()`
+#' additionally raises `zujson_io_error` when the file cannot be read at all,
+#' which is a different problem from its contents not being JSON.
 #'
 #' @param x For `json_parse()`, a single string of JSON text or a raw vector of
 #'   UTF-8 JSON bytes. For `json_parse_raw()`, a raw vector.
@@ -97,6 +104,9 @@
 #'
 #' # coerce across kinds instead of keeping the type
 #' json_parse('[1, "a"]', simplify = "coerce")
+#'
+#' # a number past the range of a double is Inf, not a parse failure
+#' json_parse("[1e309]")
 #'
 #' # an array of records, as a data frame
 #' json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)
@@ -162,12 +172,22 @@ json_parse_file <- function(path, simplify = TRUE, data_frame = FALSE) {
 #' worth parsing; use [json_parse()] when a failure should be an error you can
 #' read.
 #'
-#' This answers "is this valid JSON", which is very nearly but not exactly "will
-#' [json_parse()] succeed". The one input where they differ is a string or key
-#' containing an escaped NUL (`\u0000`): that is valid JSON, so this returns
-#' `TRUE`, but no R string can hold the result, so `json_parse()` raises
-#' `zujson_parse_error`. Code that must not fail should handle the condition
-#' from `json_parse()` rather than pre-screening with this.
+#' This answers "is this valid JSON", which is very nearly but not exactly
+#' "will [json_parse()] succeed". The two come apart on JSON that is valid and
+#' still cannot become an R value, of which there are two kinds:
+#'
+#' * a string or key R cannot hold: one containing an escaped NUL (`\u0000`),
+#'   or one longer than `.Machine$integer.max` bytes. `json_parse()` raises
+#'   `zujson_parse_error`.
+#' * nesting deeper than 1000 levels. RFC 8259 leaves any depth limit to the
+#'   implementation, so such a document is still valid JSON. `json_parse()`
+#'   raises `zujson_depth_error`, because its recursive tree builder has a C
+#'   stack to protect; the reader underneath it is iterative and does not.
+#'
+#' This function returns `TRUE` for both, and is right to: it is asked whether
+#' the bytes are JSON, not whether this package can materialise them. Code that
+#' must not fail should handle the condition from `json_parse()` rather than
+#' pre-screening with this.
 #'
 #' @param x A single string of JSON text, or a raw vector of JSON bytes.
 #' @return `TRUE` or `FALSE`.

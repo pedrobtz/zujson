@@ -84,15 +84,23 @@ test_that("zujson and jsonlite agree at the edges of the number line", {
     list('[2147483647]',   2147483647L),
     list('[-2147483648]',  -2147483648),
     list('[2147483648]',   2147483648),
-    # the double boundary: finite either side, Inf past it, 0 on underflow
-    list('[1e308]',        1e308),
+    # The double boundary: finite either side, Inf past it, 0 on underflow.
+    # 1e308 is spelled as its exact bits because R's own reader is a few ULPs
+    # off where LDOUBLE is plain double (aarch64), and both packages round the
+    # token correctly, so the literal 1e308 is the wrong reference there.
+    list('[1e308]',        0x1.1ccf385ebc8ap+1023),
     list('[1e-400]',       0),
     list('[1e309]',        Inf),
     list('[-1e309]',       -Inf),
-    # wider than int64, so neither package keeps it exact
-    list('[123456789012345678901234567890]',
-         as.numeric("123456789012345678901234567890")),
-    list('[9223372036854775808]', as.numeric("9223372036854775808"))
+    # Past int64 but inside uint64, and a power of two, so both packages are
+    # exact -- unlike as.numeric(), which is a ULP high on those platforms.
+    #
+    # Deliberately not here: an integer wider than uint64, such as
+    # 123456789012345678901234567890. zujson reads that through R_strtod and
+    # jsonlite rounds it independently, so the two agree only where LDOUBLE is
+    # 80-bit. It is not a divergence in the design, so it does not belong in
+    # either table here; zujson's own value for it is pinned in test-parse.R.
+    list('[9223372036854775808]', 2^63)
   )
 
   json <- vapply(cases, `[[`, character(1), 1L)

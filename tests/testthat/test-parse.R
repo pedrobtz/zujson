@@ -69,11 +69,17 @@ test_that("a number too large for a double becomes Inf, not an error", {
   # the value is the one R's own reader gives the same token
   expect_identical(json_parse("1e309"), as.numeric("1e309"))
 
-  # still finite either side of the boundary
-  expect_identical(json_parse("[1e308]"), 1e308)
+  # Still finite either side of the boundary. 1e308 is spelled as its exact
+  # bits rather than as the literal 1e308: R's own reader accumulates through
+  # LDOUBLE, which is plain double on aarch64, so there the literal is a few
+  # ULPs off the double yyjson correctly rounds the token to.
+  expect_identical(json_parse("[1e308]"), 0x1.1ccf385ebc8ap+1023)
   expect_identical(json_parse("[1e-400]"), 0)          # underflow, not overflow
 
-  # an integer wider than int64 keeps going through the same path
+  # An integer wider than int64 keeps going through the same path, and there
+  # as.numeric() is the expectation on purpose: that path is zu_raw_dbl(),
+  # which is R_strtod, so the value tracks R's reader even where R's reader is
+  # the less accurate of the two.
   expect_identical(json_parse("[123456789012345678901234567890]"),
                    as.numeric("123456789012345678901234567890"))
 

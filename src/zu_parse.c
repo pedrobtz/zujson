@@ -42,11 +42,42 @@ static int zu_fits_int(int64_t v) {
     return v > (int64_t) INT_MIN && v <= (int64_t) INT_MAX;
 }
 
+/* A number too big for any finite double (1e309) or wider than int64/uint64
+ * arrives as YYJSON_TYPE_RAW under BIGNUM_AS_RAW, holding the original token.
+ *
+ * Two things make reading it with a pointer and no length correct:
+ *
+ *  - The token is always followed by a delimiter -- ',', ']', '}' or space --
+ *    or by the end of yyjson's buffer, which is zero-padded by
+ *    YYJSON_PADDING_SIZE on every read path. We never pass READ_INSITU, so the
+ *    buffer is always yyjson's own padded copy and never R's memory.
+ *    R_strtod stops at the first byte that cannot continue a number, so it
+ *    consumes the token and nothing after it.
+ *  - R_strtod rather than strtod because strtod reads the decimal point in the
+ *    C locale of the moment: under a comma-decimal locale it would stop at the
+ *    '.' of 1.5e400 and return 1. R_strtod is the one R's own as.numeric()
+ *    uses, so the value is what writing the token in R source would give --
+ *    Inf here, and the nearest double for a 30-digit integer. */
+static double zu_raw_dbl(yyjson_val *v) {
+    return R_strtod(yyjson_get_raw(v), NULL);
+}
+
+/* "Is this value a number?", asked by every path that sorts numbers from
+ * strings. It has to count RAW, or a big number falls through to the branch
+ * that treats it as a JSON string and comes back as the token's text. */
+static int zu_is_num(yyjson_val *v) {
+    return yyjson_is_num(v) || yyjson_is_raw(v);
+}
+
 static zu_kind zu_val_kind(yyjson_val *v) {
     switch (yyjson_get_type(v)) {
     case YYJSON_TYPE_NULL: return ZU_K_NULL;
     case YYJSON_TYPE_BOOL: return ZU_K_LGL;
     case YYJSON_TYPE_STR:  return ZU_K_STR;
+    /* Never ZU_K_INT: a raw number is out of int64 range or infinite, so it
+     * is a double whatever it says. This is also what keeps zu_as_int() from
+     * ever seeing one. */
+    case YYJSON_TYPE_RAW:  return ZU_K_DBL;
     case YYJSON_TYPE_NUM:
         switch (yyjson_get_subtype(v)) {
         case YYJSON_SUBTYPE_SINT:
@@ -133,6 +164,7 @@ static double zu_as_dbl(yyjson_val *v) {
     switch (yyjson_get_type(v)) {
     case YYJSON_TYPE_NULL: return NA_REAL;
     case YYJSON_TYPE_BOOL: return yyjson_get_bool(v) ? 1.0 : 0.0;
+    case YYJSON_TYPE_RAW:  return zu_raw_dbl(v);
     default:
         if (yyjson_get_subtype(v) == YYJSON_SUBTYPE_UINT)
             return (double) yyjson_get_uint(v);
@@ -205,12 +237,12 @@ static SEXP zu_arr_coerce_str(yyjson_val *arr, zu_kind num_max) {
     SEXP nums, strs, out;
 
     yyjson_arr_foreach(arr, idx, max, v)
-        if (yyjson_is_num(v)) n_num++;
+        if (zu_is_num(v)) n_num++;
 
     nums = PROTECT(Rf_allocVector(num_max == ZU_K_DBL ? REALSXP : INTSXP,
                                   n_num));
     yyjson_arr_foreach(arr, idx, max, v) {
-        if (!yyjson_is_num(v)) continue;
+        if (!zu_is_num(v)) continue;
         if (num_max == ZU_K_DBL) REAL(nums)[j] = zu_as_dbl(v);
         else                     INTEGER(nums)[j] = zu_as_int(v);
         j++;
@@ -220,7 +252,7 @@ static SEXP zu_arr_coerce_str(yyjson_val *arr, zu_kind num_max) {
     out = PROTECT(Rf_allocVector(STRSXP, n));
     j = 0;
     yyjson_arr_foreach(arr, idx, max, v) {
-        if (yyjson_is_num(v)) {
+        if (zu_is_num(v)) {
             SET_STRING_ELT(out, idx, STRING_ELT(strs, j++));
         } else if (yyjson_is_bool(v)) {
             SET_STRING_ELT(out, idx,
@@ -262,7 +294,7 @@ static SEXP zu_arr_atomic(yyjson_val *arr, zu_kind kind) {
          * fill; anything else in there means COERCE put it here. */
         zu_kind num_max = ZU_K_NULL;
         yyjson_arr_foreach(arr, idx, max, v) {
-            if (yyjson_is_num(v)) {
+            if (zu_is_num(v)) {
                 zu_kind k = zu_val_kind(v);
                 if (k > num_max) num_max = k;
             } else if (yyjson_is_bool(v) && num_max < ZU_K_LGL) {
@@ -411,7 +443,7 @@ static SEXP zu_col_atomic(yyjson_val **vals, R_xlen_t n, zu_kind kind) {
         zu_kind num_max = ZU_K_NULL;
 
         for (i = 0; i < n; i++) {
-            if (vals[i] && yyjson_is_num(vals[i])) {
+            if (vals[i] && zu_is_num(vals[i])) {
                 zu_kind k = zu_val_kind(vals[i]);
                 if (k > num_max) num_max = k;
                 n_num++;
@@ -430,7 +462,7 @@ static SEXP zu_col_atomic(yyjson_val **vals, R_xlen_t n, zu_kind kind) {
         nums = PROTECT(Rf_allocVector(num_max == ZU_K_DBL ? REALSXP : INTSXP,
                                       n_num));
         for (i = 0; i < n; i++) {
-            if (!vals[i] || !yyjson_is_num(vals[i])) continue;
+            if (!vals[i] || !zu_is_num(vals[i])) continue;
             if (num_max == ZU_K_DBL) REAL(nums)[j] = zu_as_dbl(vals[i]);
             else                     INTEGER(nums)[j] = zu_as_int(vals[i]);
             j++;
@@ -441,7 +473,7 @@ static SEXP zu_col_atomic(yyjson_val **vals, R_xlen_t n, zu_kind kind) {
         for (i = 0; i < n; i++) {
             if (!vals[i] || yyjson_is_null(vals[i])) {
                 SET_STRING_ELT(out, i, NA_STRING);
-            } else if (yyjson_is_num(vals[i])) {
+            } else if (zu_is_num(vals[i])) {
                 SET_STRING_ELT(out, i, STRING_ELT(strs, j++));
             } else if (yyjson_is_bool(vals[i])) {
                 SET_STRING_ELT(out, i,
@@ -542,6 +574,7 @@ static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, int df, int depth) {
         UNPROTECT(1);
         return s;
     }
+    case YYJSON_TYPE_RAW:
     case YYJSON_TYPE_NUM:
         return zu_val_kind(v) == ZU_K_INT
             ? Rf_ScalarInteger(zu_as_int(v))
@@ -584,8 +617,19 @@ static SEXP zu_finish(yyjson_doc *doc, zu_mode mode, int df) {
  *
  * BOM: RFC 8259 forbids emitting one but allows ignoring it, and real APIs do
  * emit them. Rejecting a response body over three leading bytes would be a
- * pointless failure for the use case this package exists to serve. */
-#define ZUJSON_READ_FLAGS (YYJSON_READ_ALLOW_BOM)
+ * pointless failure for the use case this package exists to serve.
+ *
+ * BIGNUM_AS_RAW: without it yyjson rejects the whole document when a number
+ * overflows to infinity, so one absurd value anywhere in a response body makes
+ * the body unparseable. RFC 8259 sets no limit on the magnitude of a number,
+ * so 1e309 is valid JSON and refusing it is our bug, not the sender's. With
+ * the flag the token arrives as YYJSON_TYPE_RAW and zu_raw_dbl() converts it
+ * to Inf, which is what R's own as.numeric("1e309") gives.
+ *
+ * Deliberately not ALLOW_INF_AND_NAN: that also accepts the bare literals
+ * NaN, inf and -Infinity, which are not JSON at all. Since json_validate()
+ * shares this flag set, it would start calling those documents valid. */
+#define ZUJSON_READ_FLAGS (YYJSON_READ_ALLOW_BOM | YYJSON_READ_BIGNUM_AS_RAW)
 
 static SEXP zu_read_mem(const char *dat, size_t len, zu_mode mode, int df) {
     yyjson_read_err err;

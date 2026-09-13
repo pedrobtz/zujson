@@ -177,6 +177,26 @@ Parsing is meant to be pointed at an untrusted response body. yyjson validates
 UTF-8, and nesting beyond 1000 levels is rejected with a structured condition
 rather than walking off the C stack.
 
+`json_validate()` does **not** apply that cap, and deliberately: RFC 8259
+leaves any depth limit to the implementation, so a deeply nested document is
+still valid JSON, and the reader underneath is iterative --- a million nested
+arrays validate in milliseconds without touching the C stack. The cap protects
+the recursive step that builds the R value, which validation never reaches. So
+the two can differ:
+
+```{r}
+deep <- paste0(strrep("[", 1500), strrep("]", 1500))
+
+json_validate(deep)
+class(tryCatch(json_parse(deep), error = function(e) e))
+```
+
+That is the second of exactly two cases where a document passes
+`json_validate()` and still fails `json_parse()`; the other is a string R
+cannot hold, such as one containing an escaped NUL. Both are listed in
+`?json_validate`, and both are why code that must not fail should handle the
+condition from `json_parse()` rather than pre-screening.
+
 Every failure the package raises inherits from `zujson_error`, so one handler
 catches all of them:
 
@@ -192,12 +212,237 @@ class(tryCatch(json_parse("{bad"), zujson_error = function(e) e))
 zujson_info()
 ```
 
+## Conformance
+
+Claims about what a parser rejects are worth little without an external
+check, so the package is run against
+[JSONTestSuite](https://github.com/nst/JSONTestSuite) --- the standard
+corpus for exactly this question. Its files are named by what a parser must
+do: `y_` must be accepted, `n_` must be rejected, and `i_` is left to the
+implementation.
+
+```{r eval = FALSE}
+# tools/jsontestsuite.R, against a pinned upstream commit
+y_ must be accepted           95 files,   0 wrong
+n_ must be rejected          188 files,   0 wrong
+i_ implementation-defined     35 files,  12 accepted,  23 rejected
+318 parsing files, 0 wrong
+```
+
+Every file is handed to `json_validate()` as **raw bytes**. Reading them as
+text would be wrong twice over: the suite is full of deliberately invalid
+UTF-8, which a text read mangles, and of embedded NULs, which no R string can
+carry. Bytes are also what a response body actually is.
+
+### The implementation-defined cases
+
+The 35 `i_` files are where conforming parsers legitimately disagree, so they
+are the interesting ones. The answers here follow a single split: **generous
+about numbers, strict about text.**
+
+A number outside what a `double` can hold still has a well-defined nearest
+value, and R's own reader already agrees what it is --- so the document is
+read and the number is converted. Refusing the whole body over one absurd
+value would be a wildly disproportionate failure for an HTTP client.
+
+```{r}
+json_parse("[123123e100000]")   # overflows: Inf, as as.numeric() gives
+json_parse("[123e-10000000]")   # underflows: 0
+json_parse("[100000000000000000000]") # wider than int64: nearest double
+```
+
+That covers ten of the twelve acceptances: five overflow to `±Inf`, two
+underflow to `0`, and three are integers too wide for `int64`.
+
+Text is the opposite. Every string that comes back is marked as UTF-8, and
+that mark is only honest because yyjson validated the bytes. Accepting
+malformed text would mean handing back an R string that claims an encoding it
+does not have --- so all 23 rejections are text that is not valid UTF-8,
+in three groups.
+
+Eleven involve surrogates that do not form a valid pair --- ten written as
+`\uXXXX` escapes, one encoded straight into the bytes. A surrogate is only
+meaningful as half of a pair, and an unpaired one encodes no character:
+
+```{r}
+json_validate('["\\ud800"]')        # lone high surrogate
+json_validate('["\\uDd1e\\uD834"]') # a valid pair, inverted
+json_validate('["\\ud83d\\ude02"]') # a correct pair: fine
+```
+
+Nine are invalid UTF-8 byte sequences --- truncated characters, overlong
+encodings, stray continuation bytes, Latin-1 text mislabelled as JSON:
+
+```{r}
+json_validate(as.raw(c(0x22, 0xC0, 0xAF, 0x22))) # overlong encoding of "/"
+json_validate(as.raw(c(0x22, 0xE9, 0x22)))       # Latin-1 e-acute, not UTF-8
+```
+
+The last three are UTF-16, with and without a byte order mark. RFC 8259 is
+explicit that JSON exchanged between systems is UTF-8, so these are not JSON
+this package reads; convert with `iconv()` first if you have one.
+
+```{r}
+json_validate(as.raw(c(0xFF, 0xFE, 0x22, 0x00, 0x61, 0x00, 0x22, 0x00)))
+```
+
+The remaining two acceptances are structural rather than textual. 500 nested
+arrays are fine, because the depth cap is 1000 --- the cap exists to protect
+the C stack, not to second-guess the sender. And a UTF-8 byte order mark is
+skipped rather than rejected, because RFC 8259 forbids *emitting* one but
+allows ignoring it, and real APIs emit them anyway.
+
+```{r}
+json_validate(paste0(strrep("[", 500), strrep("]", 500)))
+json_parse(as.raw(c(0xEF, 0xBB, 0xBF, 0x7B, 0x7D)))  # BOM, then {}
+```
+
 ## What it deliberately does not do
 
 No matrix or N-d array simplification, no incremental streaming yet, no JSON
 pointer or patch, no custom serializers. Data frame reconstruction is opt-in
 rather than absent, and stays off by default so that the type mapping above is
 what you get unless you ask for something else.
+
+## How it differs from jsonlite
+
+`jsonlite` is excellent and much broader. Everything below is the price of a
+mapping small enough to hold in your head, not an oversight, and all of it is
+pinned in the package's own tests --- which use `jsonlite` as an oracle over
+JSON text, so a divergence that stops being deliberate fails the suite.
+
+Every cell in the tables below is computed by running both packages when this
+page is built, so none of it can quietly go stale.
+
+```{r include = FALSE}
+library(jsonlite)
+
+# One compact line per R value. Data frames and matrices are rebuilt as the
+# call that would make them, which is shorter than deparsing the attributes
+# and still says exactly what came back.
+fmt <- function(x) {
+  if (is.data.frame(x)) {
+    cols <- vapply(x, function(col) paste(deparse(col), collapse = ""), "")
+    return(sprintf("data.frame(%s)",
+                   paste(names(x), cols, sep = " = ", collapse = ", ")))
+  }
+  if (is.matrix(x)) {
+    return(sprintf("matrix(%s, nrow = %d)",
+                   paste(deparse(as.vector(x)), collapse = ""), nrow(x)))
+  }
+  paste(deparse(x, width.cutoff = 500), collapse = " ")
+}
+code <- function(x) paste0("`", x, "`")
+
+# Evaluating the same expression that gets printed as the label is what keeps
+# the two columns honest: there is no second copy to fall out of step.
+run <- function(e, f) {
+  tryCatch(f(eval(e)), zujson_error = function(c) paste0("error: ", class(c)[1]),
+           error = function(c) paste0("error: ", class(c)[1]))
+}
+label <- function(e) paste(deparse(e), collapse = "")
+```
+
+### Parsing
+
+Most JSON reads the same way in both: objects, nulls, scalars, escapes,
+surrogate pairs and the integer boundaries all agree. Four things do not, and
+three of them have an opt-in that closes the gap.
+
+```{r echo = FALSE}
+js <- c("[]", '[1, "a"]', '[{"a":1},{"b":2}]', "[[1,2],[3,4]]")
+knitr::kable(data.frame(
+  JSON = code(js),
+  zujson = code(vapply(js, function(j) fmt(json_parse(j)), "")),
+  jsonlite = code(vapply(js, function(j) fmt(fromJSON(j)), "")),
+  `Opt-in that agrees` = c("none needed --- see below",
+                           '`simplify = "coerce"`',
+                           "`data_frame = TRUE`",
+                           "none; no matrix detection"),
+  check.names = FALSE, row.names = NULL
+), row.names = FALSE)
+```
+
+The empty array is the one with no opt-in and no argument about it: with no
+elements to take a type from, the zero-length atomic vector is as good an
+answer as the empty list, and this package prefers the one that keeps `[]` and
+`[1,2]` in the same family.
+
+### Serializing
+
+This is where the two differ most, because `toJSON()` has a dozen arguments
+shaping its output and `json_write()` has two.
+
+```{r echo = FALSE}
+es <- list(
+  quote(35),
+  quote(c(a = 1, b = 2)),
+  quote(c(1, NA, Inf)),
+  quote(pi),
+  quote(NULL),
+  quote(as.POSIXct("2013-06-17 22:33:44", tz = "UTC")),
+  quote(matrix(1:4, 2)),
+  quote(complex(real = 2, imaginary = 2)),
+  quote(charToRaw("bla")),
+  quote(as.POSIXlt("2013-06-17 22:33:44", tz = "UTC"))
+)
+knitr::kable(data.frame(
+  `R value` = code(vapply(es, label, "")),
+  zujson = code(vapply(es, run, "", f = json_write)),
+  `jsonlite, at its defaults` =
+    code(vapply(es, run, "", f = function(x) as.character(toJSON(x)))),
+  check.names = FALSE, row.names = NULL
+), row.names = FALSE)
+```
+
+Four of those are worth a sentence.
+
+The unboxing defaults are **opposite**: `json_write()` unboxes a length-1
+vector and `toJSON()` does not, which is the first thing to trip over when
+porting code. A **named atomic vector** is an object here and an array there,
+and this is the one with no argument that reconciles it --- `toJSON()` drops
+vector names unless asked with `keep_vec_names`, which it also warns about.
+Every **missing or non-finite** value is `null` here, where `toJSON()`'s
+default makes a numeric `NA` the *string* `"NA"` while a character or logical
+`NA` becomes `null`. And **doubles** are written so they read back as the same
+number, rather than rounded to four digits.
+
+The refusals at the bottom of the table are deliberate: a complex number, a
+raw vector and a `POSIXlt` have no obvious JSON form, so they raise
+`zujson_unsupported_type` instead of being guessed at. A data frame column that
+is itself a data frame is refused for the same reason. `POSIXct` is always UTC,
+which is the same instant whatever `tzone` says.
+
+### Failing
+
+The divergence that matters most to a client: every failure here is a typed
+condition rather than a bare `simpleError`, so one handler catches the lot and
+can still tell the cases apart.
+
+```{r echo = FALSE}
+cls <- function(e) paste(class(tryCatch(eval(e), error = function(c) c))[1])
+deep <- paste0(strrep("[", 1500), strrep("]", 1500))
+nul <- '["a\\u0000b"]'
+knitr::kable(data.frame(
+  Input = c("`\"{bad\"`", "an escaped NUL, `\"\\u0000\"`",
+            "nesting 1500 deep", "a URL or file path"),
+  zujson = c(code(cls(quote(json_parse("{bad")))),
+             code(cls(quote(json_parse(nul)))),
+             code(cls(quote(json_parse(deep)))),
+             "never read; `json_parse_file()` is explicit"),
+  jsonlite = c(code(cls(quote(fromJSON("{bad")))),
+               paste0("silently truncates to ", code(fromJSON(nul))),
+               "C stack overflow",
+               "fetched or read"),
+  check.names = FALSE, row.names = NULL
+), row.names = FALSE)
+```
+
+The middle two are the ones to notice. An escaped NUL is valid JSON that no R
+string can hold, so refusing it is the only honest answer --- returning a
+silently shortened string loses data without saying so. And the depth cap turns
+what would be a C stack overflow into a condition you can catch, which is what
+makes the parser safe to point at a body you did not write.
 
 ## Related
 

@@ -10,11 +10,15 @@ The framing that governs every design decision: **zujson is the JSON an HTTP cli
 
 ## Current state
 
-**v1 is complete (version 0.1.0), post-review.** yyjson 0.12.0 is vendored under `src/vendor/yyjson/`, and the public API is `json_parse()`, `json_parse_raw()`, `json_parse_file()`, `json_write()`, `json_write_raw()`, `json_validate()`, `json_parse_ndjson()`, `json_write_ndjson()`, `json_write_ndjson_raw()`, `zujson_info()`. `devtools::check(cran = TRUE)` is 0/0/0; 480 tests pass, green under `shuffle = TRUE`, and both directions are clean under `gctorture(TRUE)`.
+**Version is `0.0.0.9000`: never released, no tags, not on CRAN.** The earlier `0.1.0` was a number in DESCRIPTION, not a release, and NEWS.md now says so. Two consequences: there is no released version to stay compatible with, so a mapping may still change if the design argues for it; and NEWS.md stays a single section until there is a real release, at which point its heading and DESCRIPTION `Version` move together. **That heading must carry the version number** — `# zujson 0.0.0.9000 (development version)`. R CMD check parses NEWS.md for `# <pkg> <version>` and reports `Problems with news in 'NEWS.md': No news entries found` as a NOTE if no heading has one, so the bare usethis-style `# zujson (development version)` costs a clean check once it is the only heading. yyjson 0.12.0 is vendored under `src/vendor/yyjson/`, and the public API is `json_parse()`, `json_parse_raw()`, `json_parse_file()`, `json_write()`, `json_write_raw()`, `json_validate()`, `json_parse_ndjson()`, `json_write_ndjson()`, `json_write_ndjson_raw()`, `zujson_info()`. `devtools::check(cran = TRUE)` is 0/0/0; 1157 tests pass, green under `shuffle = TRUE`, and both directions are clean under `gctorture(TRUE)`.
+
+**Landed since 0.1.0, so do not plan them again:** `simplify` gained named modes (`"preserve"` the default, `"coerce"`, `"none"`, with `TRUE`/`FALSE` as exact synonyms for the first and last); `data_frame = TRUE` turns an array of objects into a data frame wherever one appears; sanitizer and fuzzing CI exists (`hardening.yaml`, `tools/sanitizer-exercise.R`, `test-fuzz.R`); a number past double range parses as `Inf` rather than failing the read.
 
 **One acceptance criterion is open, deliberately.** Design §14.9 names `zuhttp`, which is still an empty skeleton in its own repo. The shapes it will use are covered in `test-roundtrip.R`, but the criterion cannot close until there is something to integrate with.
 
-**Phase 2 is design §15**, not more of §14.9: a `coerce` simplification mode, data frame simplification on parse, then a public C API through `LinkingTo: zujson` once a caller actually exists.
+**What is left in design §15 is blocked on that same thing**, not on effort here: a public C API through `LinkingTo: zujson`, and the streaming object of §13. Both are worth doing only once a real caller exists to shape them. Read §15 before starting anything — its list is kept current with strikethroughs.
+
+**Do not run `devtools::document()` with an older roxygen2 than `Config/roxygen2/version` in DESCRIPTION.** A downgrade silently rewrites `man/` and adds a `RoxygenNote` field; check `git diff DESCRIPTION man/` afterwards and revert anything that is not your change.
 
 - `.agents/design-zujson.md` — numbered sections §1–§15 (§5–§6 the type mappings and why they are what they are, §7 the error model, §8 the memory model, §9 depth limiting, §13 NDJSON and the deferred streaming design, §14 acceptance criteria).
 
@@ -27,7 +31,11 @@ Rscript -e 'devtools::test()'
 Rscript -e 'devtools::test(shuffle = TRUE)'           # required before calling anything done
 Rscript -e 'devtools::check(cran = TRUE)'             # target: 0 errors, 0 warnings, 0 notes
 Rscript -e 'devtools::test(filter = "write")'         # tests/testthat/test-write.R
+Rscript tools/sanitizer-exercise.R                    # base R only; what hardening.yaml runs
+Rscript tools/jsontestsuite.R                         # nst/JSONTestSuite conformance; needs network once
 ```
+
+Both `tools/` scripts call `library(zujson)`, so they run against an **installed** package, not `load_all()`. `JSONTESTSUITE_DIR=<checkout>` skips the download.
 
 Offline, `check()` emits a spurious `checking for future file timestamps ... NOTE`. Suppress it to see the real result:
 
@@ -54,7 +62,7 @@ Object files must never reach the tarball — `.Rbuildignore` excludes `src/**/*
 ## Architecture
 
 ```
-R API (json_*)            R/{parse,write,info,utils}.R
+R API (json_*)            R/{parse,write,ndjson,info,utils}.R
         |
 .Call boundary            src/init.c
         |
@@ -90,8 +98,9 @@ NDJSON lives in `zu_parse.c` and `zu_write.c` next to the single-document code r
 - **A data frame emits two container levels and must be charged for both.** It is the only value that does. Charging it one lets `json_write()` emit JSON that `json_parse()` then rejects — output the package will not read back, which is the worst bug shape available here. `test-write.R` pins both sides of the boundary.
 - **NDJSON framing rests on one fact: a raw newline cannot appear inside a JSON string.** That is why splitting on `\n` can never cut a record, and why `json_write_ndjson()` has no `pretty` argument — indented JSON contains newlines, so pretty-printed NDJSON is corrupt, not prettier. Do not add one. The reader is also deliberately stricter than `YYJSON_READ_STOP_WHEN_DONE`, which would accept newline-free concatenated JSON the content type does not promise.
 - **`zu_df_plan`/`zu_df_row()` are shared by `json_write()` and NDJSON** so the two cannot disagree about how a data frame row becomes an object. A change to row shape belongs there, not in either caller.
-- **`ZUJSON_READ_FLAGS` is shared by every read path** so `json_parse()` and `json_validate()` cannot disagree about what parses. Add a read flag there or not at all.
+- **`ZUJSON_READ_FLAGS` is shared by every read path** so `json_parse()` and `json_validate()` cannot disagree about what the *reader* accepts. Add a read flag there or not at all. They still disagree where the R-tree builder imposes a limit the reader does not, which is deliberate and is exactly two classes: a string R cannot hold (NUL escape, or over `INT_MAX` bytes) and nesting past the depth cap. `json_validate()` returns `TRUE` for both. Do not "fix" the depth one — yyjson's reader is iterative and has no notion of depth, so validation is safe at any depth; the cap protects the tree builder, which validation never runs, and enforcing it would mean walking the document on every call to return `FALSE` for something RFC 8259 §9 calls valid.
 - **`NA_INTEGER == INT_MIN`.** A JSON `-2147483648` must promote to `double`, or it comes back as `NA`. Same for anything above `INT_MAX`.
+- **A number past double range is `Inf`, not a parse failure.** RFC 8259 caps no magnitude, so `1e309` is valid JSON; rejecting it would let one absurd value make a whole response body unreadable. `YYJSON_READ_BIGNUM_AS_RAW` delivers the token as `YYJSON_TYPE_RAW` and `zu_raw_dbl()` converts it. Two traps: it must be **`R_strtod`, not `strtod`**, which reads the decimal point in the current C locale and would turn `1.5e400` into `1` under a comma-decimal locale; and **not `ALLOW_INF_AND_NAN`**, which also accepts the bare `Infinity`/`NaN` literals that are not JSON — and since the flags are shared, `json_validate()` would start calling those documents valid. Every "is this a number?" test goes through `zu_is_num()` so `NUM` and `RAW` cannot drift apart.
 - **Whole doubles are written without a decimal point.** R has no integer literal, so `1` is a double and yyjson's real writer emits `1.0`, which a schema expecting an integer rejects. The bound is **int64's range, not 2^53** — a double that is already whole *is* that integer at any magnitude, so converting is lossless; 2^53 is where consecutive integers stop being representable, which is a different question and the wrong test.
 - **Every string crossing into JSON goes through `Rf_translateCharUTF8`**, wrapped in `vmaxget`/`vmaxset` so a long character vector does not accumulate one R_alloc buffer per element. Every string coming back is marked `CE_UTF8` — accurate only because yyjson's UTF-8 validation is on.
 - **`I()` is checked before the class dispatch**, because `I()` prepends to the class vector.
@@ -107,9 +116,14 @@ NDJSON lives in `zu_parse.c` and `zu_write.c` next to the single-document code r
 - **`expect_json()` asserts on exact output bytes** — that is what a serializer is for. **`expect_roundtrip()` uses `identical()`**, so an integer quietly becoming a double fails.
 - Helpers in `helper-expect.R`: `expect_json()`, `expect_roundtrip()`, `nested_json()`, `nested_list()`.
 - `test-conditions.R` interleaves failing and succeeding calls fifty times; that is what would catch the memory model above being wrong.
+- **`test-interop-jsonlite.R` uses jsonlite as an oracle, not as a suite to port.** jsonlite's own tests are self-referential — 60 of 77 `fromJSON()` calls are `fromJSON(toJSON(x))` roundtrips, and the `toJSON()` side is saturated with arguments this package deliberately lacks — so there is nothing to import. The file instead pins two tables over JSON *text*: where the two packages agree, and a **divergence table** where they are meant not to (`[]` → `logical(0)`, `preserve` on `[1,"a"]`, no matrix detection, data frames only on request). The divergence table is the valuable half: it fires if a change makes zujson quietly more jsonlite-like than design §5 says. Both tables assert zujson's own expected value, so a jsonlite change fails with the blame in the right place. jsonlite is `Suggests` only and every block opens with `skip_if_not_installed("jsonlite")`.
 - **CRAN budget: the suite finishes in a few seconds.** Keep it there.
 
-Deliberately outside testthat, for phase 2: ASan/UBSan and valgrind jobs, `rchk` for PROTECT discipline, and parser fuzzing. Until those exist, `gctorture(TRUE)` over both directions is the check that a change to the C layer has to pass.
+Outside testthat, and now real: `.github/workflows/hardening.yaml` runs `tools/sanitizer-exercise.R` under clang-asan, clang-ubsan and gcc-asan and fuzzes the parser through the R API. That script uses nothing but base R and spends most of its effort on the error paths, where an R error longjmps past the explicit free — so **a new C error path belongs in it as well as in testthat.** `test-fuzz.R` runs a smaller version of the same idea on every test run.
+
+**External conformance is `tools/jsontestsuite.R`**, against a pinned commit of `nst/JSONTestSuite`: 95/95 must-accept and 188/188 must-reject, with the implementation-defined set at 12 accepted / 23 rejected (all 23 invalid UTF-8 or lone surrogates, which yyjson refuses because validation is on). That `i_` count is recorded in the script as a baseline and flagged when it moves, because moving it is how you tell a read-flag change apart from a conformance regression — enabling `BIGNUM_AS_RAW` moved exactly five `i_` files and no `y_`/`n_` answer. The script also re-derives the `json_parse()`/`json_validate()` divergence from the outside and finds exactly the two NUL-escape files, which is independent confirmation of the `zu_mkchar()` invariant above. It does **not** exercise the depth divergence, and cannot: the suite's only deep files are 500 levels (under the cap, so both accept) and 100,000 unterminated brackets (so both reject). `test-validate.R` covers that one.
+
+Still missing: valgrind, and `rchk` for PROTECT discipline. Until those exist, `gctorture(TRUE)` over both directions is the check that a change to the C layer has to pass, and it is still required by the definition of done below — the sanitizers run in CI, after the fact.
 
 ## Definition of done for any change
 

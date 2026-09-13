@@ -58,6 +58,41 @@ test_that("integers that do not fit R's int32 become doubles", {
   expect_identical(json_parse("[1, 9999999999]"), c(1, 9999999999))
 })
 
+test_that("a number too large for a double becomes Inf, not an error", {
+  # RFC 8259 puts no limit on the magnitude of a number, so 1e309 is valid
+  # JSON. Rejecting the document would let one absurd value anywhere in a
+  # response body make the whole body unreadable.
+  expect_identical(json_parse("1e309"), Inf)
+  expect_identical(json_parse("-1e309"), -Inf)
+  expect_identical(json_parse("[1.5e400]"), Inf)
+  expect_identical(json_parse('{"a": 1e309}'), list(a = Inf))
+  # the value is the one R's own reader gives the same token
+  expect_identical(json_parse("1e309"), as.numeric("1e309"))
+
+  # Still finite either side of the boundary. 1e308 is spelled as its exact
+  # bits rather than as the literal 1e308: R's own reader accumulates through
+  # LDOUBLE, which is plain double on aarch64, so there the literal is a few
+  # ULPs off the double yyjson correctly rounds the token to.
+  expect_identical(json_parse("[1e308]"), 0x1.1ccf385ebc8ap+1023)
+  expect_identical(json_parse("[1e-400]"), 0)          # underflow, not overflow
+
+  # An integer wider than int64 keeps going through the same path, and there
+  # as.numeric() is the expectation on purpose: that path is zu_raw_dbl(),
+  # which is R_strtod, so the value tracks R's reader even where R's reader is
+  # the less accurate of the two.
+  expect_identical(json_parse("[123456789012345678901234567890]"),
+                   as.numeric("123456789012345678901234567890"))
+
+  # and it is an ordinary double once there, so it simplifies with the rest
+  expect_identical(json_parse("[1e309, 2]"), c(Inf, 2))
+  expect_identical(json_parse("[1e309, null]"), c(Inf, NA))
+  expect_identical(json_parse('[1e309, "a"]'), list(Inf, "a"))
+  expect_identical(json_parse('[1e309, "a"]', simplify = "coerce"),
+                   c("Inf", "a"))
+  expect_identical(json_parse('[{"a":1e309},{"a":2}]', data_frame = TRUE),
+                   data.frame(a = c(Inf, 2)))
+})
+
 test_that("scalars at the root parse as length-1 vectors", {
   expect_identical(json_parse("1"), 1L)
   expect_identical(json_parse("1.5"), 1.5)

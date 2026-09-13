@@ -19,7 +19,7 @@ A named list with `zujson`, `yyjson` and `max_depth`.
 ``` r
 zujson_info()
 #> $zujson
-#> [1] "0.1.0"
+#> [1] "0.0.0.9000"
 #> 
 #> $yyjson
 #> [1] "0.12.0"

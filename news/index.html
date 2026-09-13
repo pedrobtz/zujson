@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">zujson</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,25 +38,27 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="development version" id="zujson-development-version">zujson (development version)<a class="anchor" aria-label="anchor" href="#zujson-development-version"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.0.0.9000" id="zujson-0009000-development-version">zujson 0.0.0.9000 (development version)<a class="anchor" aria-label="anchor" href="#zujson-0009000-development-version"></a></h2>
+<p>Nothing has been released yet, so everything below is unreleased, newest work first. The mappings may still change if the design argues for it.</p>
 <div class="section level3">
-<h3 id="bug-fixes-development-version">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-development-version"></a></h3>
-<ul><li>
-<code><a href="../reference/json_parse.html">json_parse_file()</a></code> on a directory now raises <code>zujson_io_error</code> on every platform. It already did on macOS and Windows, where <code>fopen()</code> refuses a directory; on Linux <code>fopen()</code> succeeds, so yyjson failed later with a memory allocation error and the call raised <code>zujson_parse_error</code> instead. The path is a directory either way, which is an io problem, not a malformed document.</li>
+<h3 id="bug-fixes-0-0-0-9000">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-0-0-0-9000"></a></h3>
+<ul><li><p>A number too large for any finite <code>double</code> now parses as <code>Inf</code> instead of failing the whole read. RFC 8259 puts no limit on the magnitude of a number, so <code>1e309</code> is valid JSON, and rejecting it let one absurd value anywhere in a response body make the entire body unparseable. The value is the one <code><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric()</a></code> gives the same token, so an integer wider than <code>int64</code> reads as the nearest double. <code>json_validate("1e309")</code> is <code>TRUE</code> for the same reason. The bare literals <code>Infinity</code>, <code>-Infinity</code> and <code>NaN</code> are not JSON and are still rejected.</p></li>
+<li><p><code><a href="../reference/json_parse.html">json_parse_file()</a></code> on a directory now raises <code>zujson_io_error</code> on every platform. It already did on macOS and Windows, where <code>fopen()</code> refuses a directory; on Linux <code>fopen()</code> succeeds, so yyjson failed later with a memory allocation error and the call raised <code>zujson_parse_error</code> instead. The path is a directory either way, which is an io problem, not a malformed document.</p></li>
 </ul></div>
 <div class="section level3">
-<h3 id="parsing-development-version">Parsing<a class="anchor" aria-label="anchor" href="#parsing-development-version"></a></h3>
+<h3 id="parsing-0-0-0-9000">Parsing<a class="anchor" aria-label="anchor" href="#parsing-0-0-0-9000"></a></h3>
 <ul><li><p><code>simplify</code> gains named modes. <code>"preserve"</code> (the default, and what <code>TRUE</code> has always meant) keeps a mixed-kind array as a list; <code>"coerce"</code> promotes it to a character vector following R’s own rules, so <code>[1, "a"]</code> becomes <code>c("1", "a")</code> and a JSON <code>null</code> becomes <code>NA</code> rather than the string <code>"NA"</code>. <code>"none"</code> is <code>FALSE</code>. <code>TRUE</code> and <code>FALSE</code> keep working and mean exactly what they did, so nothing written against the old API changes meaning.</p></li>
 <li><p><code>data_frame = TRUE</code> turns a non-empty array whose elements are all objects into a data frame, wherever one appears. Columns are the union of the keys in first-seen order and a missing key reads as <code>NA</code>, so ragged records still give a rectangular result. Columns simplify with the active <code>simplify</code> mode. Off by default: the documented type mapping is unchanged unless you ask.</p></li>
 </ul></div>
 <div class="section level3">
-<h3 id="infrastructure-development-version">Infrastructure<a class="anchor" aria-label="anchor" href="#infrastructure-development-version"></a></h3>
-<ul><li>Sanitizer and randomised-input CI. <code>tools/sanitizer-exercise.R</code> drives the C layer using nothing but base R, with most of its effort on the error paths, where an R error longjmps past the explicit free; <code>hardening.yaml</code> runs it under clang-asan, clang-ubsan and gcc-asan, and fuzzes the parser separately. <code>tests/testthat/test-fuzz.R</code> runs a smaller version of the same idea on every test run.</li>
+<h3 id="infrastructure-0-0-0-9000">Infrastructure<a class="anchor" aria-label="anchor" href="#infrastructure-0-0-0-9000"></a></h3>
+<ul><li><p>Differential tests against <code>jsonlite</code>, in <code>tests/testthat/test-interop-jsonlite.R</code>. Two tables over JSON text: where the two packages agree, and a divergence table pinning the places they are meant not to — <code>[]</code> is <code>logical(0)</code>, <code>preserve</code> keeps <code>[1, "a"]</code> a list, there is no matrix detection, and data frames are opt-in. The second table is the useful one: it fails if a change quietly makes this package more <code>jsonlite</code>-like than the documented mapping says. <code>jsonlite</code> is a suggested package and the tests skip without it.</p></li>
+<li><p>Conformance against <code>nst/JSONTestSuite</code>, in <code>tools/jsontestsuite.R</code>. Every file is handed to <code><a href="../reference/json_validate.html">json_validate()</a></code> as raw bytes — the suite is full of deliberately invalid UTF-8 and embedded NULs, which a text read would mangle. The package accepts all 95 files it must accept and rejects all 188 it must reject; of the 35 implementation-defined files it accepts 12, the rejections being invalid UTF-8 and lone surrogates. The script pins an upstream commit so the result cannot drift under it, and needs the network only once.</p></li>
+<li><p>Sanitizer and randomised-input CI. <code>tools/sanitizer-exercise.R</code> drives the C layer using nothing but base R, with most of its effort on the error paths, where an R error longjmps past the explicit free; <code>hardening.yaml</code> runs it under clang-asan, clang-ubsan and gcc-asan, and fuzzes the parser separately. <code>tests/testthat/test-fuzz.R</code> runs a smaller version of the same idea on every test run.</p></li>
 </ul></div>
-</div>
-    <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.1.0" id="zujson-010">zujson 0.1.0<a class="anchor" aria-label="anchor" href="#zujson-010"></a></h2>
-<p>First release.</p>
+<div class="section level3">
+<h3 id="initial-feature-set-0-0-0-9000">Initial feature set<a class="anchor" aria-label="anchor" href="#initial-feature-set-0-0-0-9000"></a></h3>
+<p>The v1 work, previously labelled 0.1.0 — a version number, not a release.</p>
 <ul><li>
 <code><a href="../reference/json_parse.html">json_parse()</a></code>, <code><a href="../reference/json_parse.html">json_parse_raw()</a></code> and <code><a href="../reference/json_parse.html">json_parse_file()</a></code> turn JSON into R vectors and lists. Arrays simplify to atomic vectors only when their elements share a type, so a value’s type survives the round trip; <code>simplify = FALSE</code> turns simplification off entirely.</li>
 <li>
@@ -71,6 +73,7 @@
 <li>A leading UTF-8 byte order mark is ignored rather than rejected, and a <code>POSIXlt</code> is refused rather than serialized as its 11 internal fields.</li>
 <li>yyjson 0.12.0 is vendored under <code>src/vendor/yyjson</code>; no system library is needed.</li>
 </ul></div>
+</div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

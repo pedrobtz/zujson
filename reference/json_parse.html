@@ -13,7 +13,7 @@ type is already known."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">zujson</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -94,7 +94,10 @@ frames</em> below.</p></dd>
     <h2 id="type-mapping">Type mapping<a class="anchor" aria-label="anchor" href="#type-mapping"></a></h2>
     <p>JSON objects always become named lists. JSON arrays become an atomic vector
 when every element agrees on a type and a list otherwise:</p><table class="table table"><tr><td>JSON</td><td>R</td></tr><tr><td><code>{"a": 1}</code></td><td>named <code>list</code></td></tr><tr><td><code>[1, 2, 3]</code></td><td><code>integer</code></td></tr><tr><td><code>[1, 2.5]</code></td><td><code>double</code></td></tr><tr><td><code>[true, false]</code></td><td><code>logical</code></td></tr><tr><td><code>["a", "b"]</code></td><td><code>character</code></td></tr><tr><td><code>[1, "a"]</code></td><td><code>list</code> (no common type without coercing)</td></tr><tr><td><code>[1, {}]</code></td><td><code>list</code> (nested container)</td></tr><tr><td><code>[]</code>, <code>[null, null]</code></td><td><code>logical</code></td></tr><tr><td><code>null</code></td><td><code>NULL</code></td></tr></table><p>Numbers become <code>integer</code> when they fit in R's 32-bit integer and <code>double</code>
-otherwise. A <code>null</code> inside an array being simplified becomes <code>NA</code>; a <code>null</code>
+otherwise. A number too large for any finite <code>double</code> becomes <code>Inf</code> rather
+than an error: RFC 8259 sets no limit on the magnitude of a number, so
+<code>1e309</code> is valid JSON, and the value is the one <code><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric()</a></code> gives the
+same token. A <code>null</code> inside an array being simplified becomes <code>NA</code>; a <code>null</code>
 anywhere else becomes <code>NULL</code>. Strings arrive as UTF-8.</p>
     </div>
     <div class="section level2">
@@ -119,13 +122,17 @@ such an array appears, however deeply nested.</p>
 <p>Nesting deeper than 1000 levels is rejected with a <code>zujson_depth_error</code>,
 which is what makes the parser safe to point at an untrusted response body.</p>
 <p>A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
-forbids emitting one but allows ignoring it, and real APIs emit them.</p>
-<p>Two things that are valid JSON still cannot become R values, and both raise
-<code>zujson_parse_error</code> rather than a bare error: a string or key containing an
-escaped NUL (<code>\u0000</code>), which no R string can hold, and one longer than
-<code>.Machine$integer.max</code> bytes. <code>json_parse_file()</code> additionally raises
-<code>zujson_io_error</code> when the file cannot be read at all, which is a different
-problem from its contents not being JSON.</p>
+forbids emitting one but allows ignoring it, and real APIs emit them. The
+bare literals <code>Infinity</code>, <code>-Infinity</code> and <code>NaN</code> are not JSON and stay
+rejected, which is a separate question from the magnitude of a number that
+<em>is</em> written as one.</p>
+<p>Two <em>further</em> things are valid JSON and still cannot become R values, and
+both raise <code>zujson_parse_error</code> rather than a bare error, so a caller
+handling <code>zujson_error</code> catches them alongside everything else: a string or
+key containing an escaped NUL (<code>\u0000</code>), which no R string can hold, and
+one longer than <code>.Machine$integer.max</code> bytes. <code>json_parse_file()</code>
+additionally raises <code>zujson_io_error</code> when the file cannot be read at all,
+which is a different problem from its contents not being JSON.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -173,6 +180,10 @@ without building a result.</p></div>
 <span class="r-in"><span><span class="co"># coerce across kinds instead of keeping the type</span></span></span>
 <span class="r-in"><span><span class="fu">json_parse</span><span class="op">(</span><span class="st">'[1, "a"]'</span>, simplify <span class="op">=</span> <span class="st">"coerce"</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] "1" "a"</span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># a number past the range of a double is Inf, not a parse failure</span></span></span>
+<span class="r-in"><span><span class="fu">json_parse</span><span class="op">(</span><span class="st">"[1e309]"</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] Inf</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># an array of records, as a data frame</span></span></span>
 <span class="r-in"><span><span class="fu">json_parse</span><span class="op">(</span><span class="st">'[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]'</span>, data_frame <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>

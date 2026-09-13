@@ -13,7 +13,7 @@ read."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">zujson</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -70,12 +70,19 @@ read.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>This answers "is this valid JSON", which is very nearly but not exactly "will
-<code><a href="json_parse.html">json_parse()</a></code> succeed". The one input where they differ is a string or key
-containing an escaped NUL (<code>\u0000</code>): that is valid JSON, so this returns
-<code>TRUE</code>, but no R string can hold the result, so <code><a href="json_parse.html">json_parse()</a></code> raises
-<code>zujson_parse_error</code>. Code that must not fail should handle the condition
-from <code><a href="json_parse.html">json_parse()</a></code> rather than pre-screening with this.</p>
+    <p>This answers "is this valid JSON", which is very nearly but not exactly
+"will <code><a href="json_parse.html">json_parse()</a></code> succeed". The two come apart on JSON that is valid and
+still cannot become an R value, of which there are two kinds:</p><ul><li><p>a string or key R cannot hold: one containing an escaped NUL (<code>\u0000</code>),
+or one longer than <code>.Machine$integer.max</code> bytes. <code><a href="json_parse.html">json_parse()</a></code> raises
+<code>zujson_parse_error</code>.</p></li>
+<li><p>nesting deeper than 1000 levels. RFC 8259 leaves any depth limit to the
+implementation, so such a document is still valid JSON. <code><a href="json_parse.html">json_parse()</a></code>
+raises <code>zujson_depth_error</code>, because its recursive tree builder has a C
+stack to protect; the reader underneath it is iterative and does not.</p></li>
+</ul><p>This function returns <code>TRUE</code> for both, and is right to: it is asked whether
+the bytes are JSON, not whether this package can materialise them. Code that
+must not fail should handle the condition from <code><a href="json_parse.html">json_parse()</a></code> rather than
+pre-screening with this.</p>
     </div>
 
     <div class="section level2">

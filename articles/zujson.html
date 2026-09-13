@@ -20,7 +20,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">zujson</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -331,9 +331,30 @@ direct:</p>
 <p>Parsing is meant to be pointed at an untrusted response body. yyjson
 validates UTF-8, and nesting beyond 1000 levels is rejected with a
 structured condition rather than walking off the C stack.</p>
+<p><code><a href="../reference/json_validate.html">json_validate()</a></code> does <strong>not</strong> apply that
+cap, and deliberately: RFC 8259 leaves any depth limit to the
+implementation, so a deeply nested document is still valid JSON, and the
+reader underneath is iterative — a million nested arrays validate in
+milliseconds without touching the C stack. The cap protects the
+recursive step that builds the R value, which validation never reaches.
+So the two can differ:</p>
+<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">deep</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/strrep.html" class="external-link">strrep</a></span><span class="op">(</span><span class="st">"["</span>, <span class="fl">1500</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/strrep.html" class="external-link">strrep</a></span><span class="op">(</span><span class="st">"]"</span>, <span class="fl">1500</span><span class="op">)</span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="va">deep</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/class.html" class="external-link">class</a></span><span class="op">(</span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span><span class="fu"><a href="../reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="va">deep</span><span class="op">)</span>, error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="va">e</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "zujson_depth_error" "zujson_error"       "error"             </span></span>
+<span><span class="co">#&gt; [4] "condition"</span></span></code></pre></div>
+<p>That is the second of exactly two cases where a document passes
+<code><a href="../reference/json_validate.html">json_validate()</a></code> and still fails <code><a href="../reference/json_parse.html">json_parse()</a></code>;
+the other is a string R cannot hold, such as one containing an escaped
+NUL. Both are listed in <code><a href="../reference/json_validate.html">?json_validate</a></code>, and both are why
+code that must not fail should handle the condition from
+<code><a href="../reference/json_parse.html">json_parse()</a></code> rather than pre-screening.</p>
 <p>Every failure the package raises inherits from
 <code>zujson_error</code>, so one handler catches all of them:</p>
-<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span><span class="fu"><a href="../reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="st">"{bad"</span><span class="op">)</span>, zujson_error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">conditionMessage</a></span><span class="op">(</span><span class="va">e</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] "invalid JSON at byte 1: unexpected character, expected a string key"</span></span>
 <span></span>
@@ -342,16 +363,100 @@ structured condition rather than walking off the C stack.</p>
 <span><span class="co">#&gt; [4] "condition"</span></span></code></pre></div>
 <p><code><a href="../reference/zujson_info.html">zujson_info()</a></code> reports the build and the vendored yyjson
 version:</p>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/zujson_info.html">zujson_info</a></span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="co">#&gt; $zujson</span></span>
-<span><span class="co">#&gt; [1] "0.1.0"</span></span>
+<span><span class="co">#&gt; [1] "0.0.0.9000"</span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; $yyjson</span></span>
 <span><span class="co">#&gt; [1] "0.12.0"</span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; $max_depth</span></span>
 <span><span class="co">#&gt; [1] 1000</span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="conformance">Conformance<a class="anchor" aria-label="anchor" href="#conformance"></a>
+</h2>
+<p>Claims about what a parser rejects are worth little without an
+external check, so the package is run against <a href="https://github.com/nst/JSONTestSuite" class="external-link">JSONTestSuite</a> — the
+standard corpus for exactly this question. Its files are named by what a
+parser must do: <code>y_</code> must be accepted, <code>n_</code> must
+be rejected, and <code>i_</code> is left to the implementation.</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a><span class="co"># tools/jsontestsuite.R, against a pinned upstream commit</span></span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>y_ must be accepted           <span class="dv">95</span> files,   <span class="dv">0</span> wrong</span>
+<span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a>n_ must be rejected          <span class="dv">188</span> files,   <span class="dv">0</span> wrong</span>
+<span id="cb17-4"><a href="#cb17-4" tabindex="-1"></a>i_ implementation<span class="sc">-</span>defined     <span class="dv">35</span> files,  <span class="dv">12</span> accepted,  <span class="dv">23</span> rejected</span>
+<span id="cb17-5"><a href="#cb17-5" tabindex="-1"></a><span class="dv">318</span> parsing files, <span class="dv">0</span> wrong</span></code></pre></div>
+<p>Every file is handed to <code><a href="../reference/json_validate.html">json_validate()</a></code> as <strong>raw
+bytes</strong>. Reading them as text would be wrong twice over: the
+suite is full of deliberately invalid UTF-8, which a text read mangles,
+and of embedded NULs, which no R string can carry. Bytes are also what a
+response body actually is.</p>
+<div class="section level3">
+<h3 id="the-implementation-defined-cases">The implementation-defined cases<a class="anchor" aria-label="anchor" href="#the-implementation-defined-cases"></a>
+</h3>
+<p>The 35 <code>i_</code> files are where conforming parsers
+legitimately disagree, so they are the interesting ones. The answers
+here follow a single split: <strong>generous about numbers, strict about
+text.</strong></p>
+<p>A number outside what a <code>double</code> can hold still has a
+well-defined nearest value, and R’s own reader already agrees what it is
+— so the document is read and the number is converted. Refusing the
+whole body over one absurd value would be a wildly disproportionate
+failure for an HTTP client.</p>
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="st">"[123123e100000]"</span><span class="op">)</span>   <span class="co"># overflows: Inf, as as.numeric() gives</span></span>
+<span><span class="co">#&gt; [1] Inf</span></span>
+<span><span class="fu"><a href="../reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="st">"[123e-10000000]"</span><span class="op">)</span>   <span class="co"># underflows: 0</span></span>
+<span><span class="co">#&gt; [1] 0</span></span>
+<span><span class="fu"><a href="../reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="st">"[100000000000000000000]"</span><span class="op">)</span> <span class="co"># wider than int64: nearest double</span></span>
+<span><span class="co">#&gt; [1] 1e+20</span></span></code></pre></div>
+<p>That covers ten of the twelve acceptances: five overflow to
+<code>±Inf</code>, two underflow to <code>0</code>, and three are
+integers too wide for <code>int64</code>.</p>
+<p>Text is the opposite. Every string that comes back is marked as
+UTF-8, and that mark is only honest because yyjson validated the bytes.
+Accepting malformed text would mean handing back an R string that claims
+an encoding it does not have — so all 23 rejections are text that is not
+valid UTF-8, in three groups.</p>
+<p>Eleven involve surrogates that do not form a valid pair — ten written
+as <code>\uXXXX</code> escapes, one encoded straight into the bytes. A
+surrogate is only meaningful as half of a pair, and an unpaired one
+encodes no character:</p>
+<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="st">'["\\ud800"]'</span><span class="op">)</span>        <span class="co"># lone high surrogate</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span>
+<span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="st">'["\\uDd1e\\uD834"]'</span><span class="op">)</span> <span class="co"># a valid pair, inverted</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span>
+<span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="st">'["\\ud83d\\ude02"]'</span><span class="op">)</span> <span class="co"># a correct pair: fine</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+<p>Nine are invalid UTF-8 byte sequences — truncated characters,
+overlong encodings, stray continuation bytes, Latin-1 text mislabelled
+as JSON:</p>
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/raw.html" class="external-link">as.raw</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0x22</span>, <span class="fl">0xC0</span>, <span class="fl">0xAF</span>, <span class="fl">0x22</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="co"># overlong encoding of "/"</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span>
+<span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/raw.html" class="external-link">as.raw</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0x22</span>, <span class="fl">0xE9</span>, <span class="fl">0x22</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>       <span class="co"># Latin-1 e-acute, not UTF-8</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
+<p>The last three are UTF-16, with and without a byte order mark. RFC
+8259 is explicit that JSON exchanged between systems is UTF-8, so these
+are not JSON this package reads; convert with <code><a href="https://rdrr.io/r/base/iconv.html" class="external-link">iconv()</a></code> first
+if you have one.</p>
+<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/raw.html" class="external-link">as.raw</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0xFF</span>, <span class="fl">0xFE</span>, <span class="fl">0x22</span>, <span class="fl">0x00</span>, <span class="fl">0x61</span>, <span class="fl">0x00</span>, <span class="fl">0x22</span>, <span class="fl">0x00</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
+<p>The remaining two acceptances are structural rather than textual. 500
+nested arrays are fine, because the depth cap is 1000 — the cap exists
+to protect the C stack, not to second-guess the sender. And a UTF-8 byte
+order mark is skipped rather than rejected, because RFC 8259 forbids
+<em>emitting</em> one but allows ignoring it, and real APIs emit them
+anyway.</p>
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/json_validate.html">json_validate</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/strrep.html" class="external-link">strrep</a></span><span class="op">(</span><span class="st">"["</span>, <span class="fl">500</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/strrep.html" class="external-link">strrep</a></span><span class="op">(</span><span class="st">"]"</span>, <span class="fl">500</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span>
+<span><span class="fu"><a href="../reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/raw.html" class="external-link">as.raw</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0xEF</span>, <span class="fl">0xBB</span>, <span class="fl">0xBF</span>, <span class="fl">0x7B</span>, <span class="fl">0x7D</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>  <span class="co"># BOM, then {}</span></span>
+<span><span class="co">#&gt; named list()</span></span></code></pre></div>
+</div>
 </div>
 <div class="section level2">
 <h2 id="what-it-deliberately-does-not-do">What it deliberately does not do<a class="anchor" aria-label="anchor" href="#what-it-deliberately-does-not-do"></a>
@@ -361,6 +466,210 @@ no JSON pointer or patch, no custom serializers. Data frame
 reconstruction is opt-in rather than absent, and stays off by default so
 that the type mapping above is what you get unless you ask for something
 else.</p>
+</div>
+<div class="section level2">
+<h2 id="how-it-differs-from-jsonlite">How it differs from jsonlite<a class="anchor" aria-label="anchor" href="#how-it-differs-from-jsonlite"></a>
+</h2>
+<p><code>jsonlite</code> is excellent and much broader. Everything below
+is the price of a mapping small enough to hold in your head, not an
+oversight, and all of it is pinned in the package’s own tests — which
+use <code>jsonlite</code> as an oracle over JSON text, so a divergence
+that stops being deliberate fails the suite.</p>
+<p>Every cell in the tables below is computed by running both packages
+when this page is built, so none of it can quietly go stale.</p>
+<div class="section level3">
+<h3 id="parsing-1">Parsing<a class="anchor" aria-label="anchor" href="#parsing-1"></a>
+</h3>
+<p>Most JSON reads the same way in both: objects, nulls, scalars,
+escapes, surrogate pairs and the integer boundaries all agree. Four
+things do not, and three of them have an opt-in that closes the gap.</p>
+<table class="table">
+<colgroup>
+<col width="16%">
+<col width="28%">
+<col width="34%">
+<col width="20%">
+</colgroup>
+<thead><tr class="header">
+<th align="left">JSON</th>
+<th align="left">zujson</th>
+<th align="left">jsonlite</th>
+<th align="left">Opt-in that agrees</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td align="left"><code>[]</code></td>
+<td align="left"><code>logical(0)</code></td>
+<td align="left"><code><a href="https://rdrr.io/r/base/list.html" class="external-link">list()</a></code></td>
+<td align="left">none needed — see below</td>
+</tr>
+<tr class="even">
+<td align="left"><code>[1, "a"]</code></td>
+<td align="left"><code>list(1L, "a")</code></td>
+<td align="left"><code>c("1", "a")</code></td>
+<td align="left"><code>simplify = "coerce"</code></td>
+</tr>
+<tr class="odd">
+<td align="left"><code>[{"a":1},{"b":2}]</code></td>
+<td align="left"><code>list(list(a = 1L), list(b = 2L))</code></td>
+<td align="left"><code>data.frame(a = c(1L, NA), b = c(NA, 2L))</code></td>
+<td align="left"><code>data_frame = TRUE</code></td>
+</tr>
+<tr class="even">
+<td align="left"><code>[[1,2],[3,4]]</code></td>
+<td align="left"><code>list(1:2, 3:4)</code></td>
+<td align="left"><code>matrix(c(1L, 3L, 2L, 4L), nrow = 2)</code></td>
+<td align="left">none; no matrix detection</td>
+</tr>
+</tbody>
+</table>
+<p>The empty array is the one with no opt-in and no argument about it:
+with no elements to take a type from, the zero-length atomic vector is
+as good an answer as the empty list, and this package prefers the one
+that keeps <code>[]</code> and <code>[1,2]</code> in the same
+family.</p>
+</div>
+<div class="section level3">
+<h3 id="serializing-1">Serializing<a class="anchor" aria-label="anchor" href="#serializing-1"></a>
+</h3>
+<p>This is where the two differ most, because <code>toJSON()</code> has
+a dozen arguments shaping its output and <code><a href="../reference/json_write.html">json_write()</a></code> has
+two.</p>
+<table class="table">
+<colgroup>
+<col width="44%">
+<col width="30%">
+<col width="24%">
+</colgroup>
+<thead><tr class="header">
+<th align="left">R value</th>
+<th align="left">zujson</th>
+<th align="left">jsonlite, at its defaults</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td align="left"><code>35</code></td>
+<td align="left"><code>35</code></td>
+<td align="left"><code>[35]</code></td>
+</tr>
+<tr class="even">
+<td align="left"><code>c(a = 1, b = 2)</code></td>
+<td align="left"><code>{"a":1,"b":2}</code></td>
+<td align="left"><code>[1,2]</code></td>
+</tr>
+<tr class="odd">
+<td align="left"><code>c(1, NA, Inf)</code></td>
+<td align="left"><code>[1,null,null]</code></td>
+<td align="left"><code>[1,"NA","Inf"]</code></td>
+</tr>
+<tr class="even">
+<td align="left"><code>pi</code></td>
+<td align="left"><code>3.141592653589793</code></td>
+<td align="left"><code>[3.1416]</code></td>
+</tr>
+<tr class="odd">
+<td align="left"><code>NULL</code></td>
+<td align="left"><code>null</code></td>
+<td align="left"><code><a href="https://rdrr.io/r/base/Paren.html" class="external-link">{}</a></code></td>
+</tr>
+<tr class="even">
+<td align="left"><code>as.POSIXct("2013-06-17 22:33:44", tz = "UTC")</code></td>
+<td align="left"><code>"2013-06-17T22:33:44Z"</code></td>
+<td align="left"><code>["2013-06-17 22:33:44"]</code></td>
+</tr>
+<tr class="odd">
+<td align="left"><code>matrix(1:4, 2)</code></td>
+<td align="left"><code>[1,2,3,4]</code></td>
+<td align="left"><code>[[1,3],[2,4]]</code></td>
+</tr>
+<tr class="even">
+<td align="left"><code>complex(real = 2, imaginary = 2)</code></td>
+<td align="left"><code>error: zujson_unsupported_type</code></td>
+<td align="left"><code>["2+2i"]</code></td>
+</tr>
+<tr class="odd">
+<td align="left"><code>charToRaw("bla")</code></td>
+<td align="left"><code>error: zujson_unsupported_type</code></td>
+<td align="left"><code>["Ymxh"]</code></td>
+</tr>
+<tr class="even">
+<td align="left"><code>as.POSIXlt("2013-06-17 22:33:44", tz = "UTC")</code></td>
+<td align="left"><code>error: zujson_unsupported_type</code></td>
+<td align="left"><code>["2013-06-17 22:33:44"]</code></td>
+</tr>
+</tbody>
+</table>
+<p>Four of those are worth a sentence.</p>
+<p>The unboxing defaults are <strong>opposite</strong>:
+<code><a href="../reference/json_write.html">json_write()</a></code> unboxes a length-1 vector and
+<code>toJSON()</code> does not, which is the first thing to trip over
+when porting code. A <strong>named atomic vector</strong> is an object
+here and an array there, and this is the one with no argument that
+reconciles it — <code>toJSON()</code> drops vector names unless asked
+with <code>keep_vec_names</code>, which it also warns about. Every
+<strong>missing or non-finite</strong> value is <code>null</code> here,
+where <code>toJSON()</code>’s default makes a numeric <code>NA</code>
+the <em>string</em> <code>"NA"</code> while a character or logical
+<code>NA</code> becomes <code>null</code>. And <strong>doubles</strong>
+are written so they read back as the same number, rather than rounded to
+four digits.</p>
+<p>The refusals at the bottom of the table are deliberate: a complex
+number, a raw vector and a <code>POSIXlt</code> have no obvious JSON
+form, so they raise <code>zujson_unsupported_type</code> instead of
+being guessed at. A data frame column that is itself a data frame is
+refused for the same reason. <code>POSIXct</code> is always UTC, which
+is the same instant whatever <code>tzone</code> says.</p>
+</div>
+<div class="section level3">
+<h3 id="failing">Failing<a class="anchor" aria-label="anchor" href="#failing"></a>
+</h3>
+<p>The divergence that matters most to a client: every failure here is a
+typed condition rather than a bare <code>simpleError</code>, so one
+handler catches the lot and can still tell the cases apart.</p>
+<table class="table">
+<colgroup>
+<col width="27%">
+<col width="45%">
+<col width="26%">
+</colgroup>
+<thead><tr class="header">
+<th align="left">Input</th>
+<th align="left">zujson</th>
+<th align="left">jsonlite</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td align="left"><code>"{bad"</code></td>
+<td align="left"><code>zujson_parse_error</code></td>
+<td align="left"><code>simpleError</code></td>
+</tr>
+<tr class="even">
+<td align="left">an escaped NUL, <code>"\u0000"</code>
+</td>
+<td align="left"><code>zujson_parse_error</code></td>
+<td align="left">silently truncates to <code>a</code>
+</td>
+</tr>
+<tr class="odd">
+<td align="left">nesting 1500 deep</td>
+<td align="left"><code>zujson_depth_error</code></td>
+<td align="left">C stack overflow</td>
+</tr>
+<tr class="even">
+<td align="left">a URL or file path</td>
+<td align="left">never read; <code><a href="../reference/json_parse.html">json_parse_file()</a></code> is
+explicit</td>
+<td align="left">fetched or read</td>
+</tr>
+</tbody>
+</table>
+<p>The middle two are the ones to notice. An escaped NUL is valid JSON
+that no R string can hold, so refusing it is the only honest answer —
+returning a silently shortened string loses data without saying so. And
+the depth cap turns what would be a C stack overflow into a condition
+you can catch, which is what makes the parser safe to point at a body
+you did not write.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="related">Related<a class="anchor" aria-label="anchor" href="#related"></a>

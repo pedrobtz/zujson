@@ -14,9 +14,13 @@
 zujson_info <- function() {
   # Everything but the package version comes from the compiled object rather
   # than being restated here, so there is only ever one copy of each.
-  info <- .Call(C_zujson_build_info)
+  info <- zu_build_info()
+  # max_xlen is the ceiling zu_df_cells() clamps the option to, which is an
+  # internal detail of how the budget is carried into C, not a limit a caller
+  # has to reason about
+  info$max_xlen <- NULL
   # the limit in force, not the compiled-in default, since the option can
-  # change it and a caller asking is asking what will happen
+  # change it -- and the clamped value, since that is what will be enforced
   info$max_df_cells <- zu_df_cells()
   c(list(zujson = as.character(utils::packageVersion("zujson"))), info)
 }

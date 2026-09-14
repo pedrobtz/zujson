@@ -313,6 +313,9 @@ zujson_info()
 #> 
 #> $max_depth
 #> [1] 1000
+#> 
+#> $max_df_cells
+#> [1] 5e+07
 ```
 
 ## Conformance

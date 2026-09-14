@@ -41,7 +41,7 @@ public API is
 [`json_write_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md),
 [`json_write_ndjson_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md),
 [`zujson_info()`](https://pedrobtz.github.io/zujson/reference/zujson_info.md).
-`devtools::check(cran = TRUE)` is 0/0/0; 1157 tests pass, green under
+`devtools::check(cran = TRUE)` is 0/0/0; 1207 tests pass, green under
 `shuffle = TRUE`, and both directions are clean under `gctorture(TRUE)`.
 
 **Landed since 0.1.0, so do not plan them again:** `simplify` gained
@@ -186,12 +186,14 @@ silently not built.
   to call from anywhere in either recursion. Finalizers clear the
   address before freeing, which is what makes eager release and a later
   GC pass mutually safe.
+
 - **Depth counts containers, not values.** The root container is level
   1; a scalar inside it is not a level of its own. Check where a
   container is *built*, not on entry to every value — the obvious
   version makes the two directions disagree by one, and the parser’s
   atomic-array shortcut hides it. `nested_json()`/`nested_list()` in
   `helper-expect.R` are what pin this down.
+
 - **`zu_mkchar()` is the only place a CHARSXP is made, and it must stay
   that way.** Both guards live there — the `INT_MAX` length check and
   the embedded-NUL check — so string values and object keys cannot drift
@@ -200,14 +202,51 @@ silently not built.
   R internals that escapes the `zujson_error` contract entirely. That is
   the single most important thing not to regress, because `zuhttp`’s
   error handling is built on that contract.
+
 - **A data frame emits two container levels and must be charged for
   both.** It is the only value that does. Charging it one lets
   [`json_write()`](https://pedrobtz.github.io/zujson/reference/json_write.md)
   emit JSON that
   [`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
   then rejects — output the package will not read back, which is the
-  worst bug shape available here. `test-write.R` pins both sides of the
-  boundary.
+  worst bug shape available here. Both halves were once off by one in
+  *opposite* directions, so test the two things that actually catch it:
+  parsing, that the row objects are charged even though they never reach
+  `zu_to_sexp()` (`zu_arr_df()` checks `depth + 1` itself and hands
+  cells `depth + 2`); writing, that a *cell* holding a container is
+  charged once and not twice (`zu_df_row()` passes its own level to
+  `zu_w_elt()`, which adds the level itself). A frame nested inside
+  lists is charged by the ordinary list recursion and stays correct
+  either way, so it tests nothing here — the case that matters is a
+  nested value in a cell. `test-write.R` and `test-parse.R` pin both.
+
+- **A data frame’s size comes from the union of the keys, not from the
+  input.** Records that share no keys ask for one column per record, so
+  72 kB of JSON becomes a 5000 x 5000 frame. `ZUJSON_MAX_DF_CELLS` (5e7,
+  the default) caps rows x columns and `zujson_limit_error` fires as the
+  offending column appears, before the allocation. A body-size limit
+  upstream cannot replace it — the growth is quadratic in the body — and
+  leaving it uncapped degrades to R’s allocator raising a bare
+  `simpleError`. It is the one limit here that is settable, through
+  `options(zujson.max_df_cells = )`: unlike the depth cap it is a
+  budget, not a property of the C stack. **The option is resolved in R
+  and threaded to C in place of the `data_frame` flag** — `df` is no
+  longer a boolean but a cell budget where 0 means off, so the recursion
+  carries one value instead of two that must agree. `Inf` is refused in
+  R because the cast to `R_xlen_t` would be undefined. The two costs
+  that are not capped are kept linear instead: the key union goes
+  through the open-addressed index in `zu_collect_keys()`, and the cells
+  are filled by one scattering pass — never by asking each record for
+  each key, which is a scan of that record per cell and was 69s on a
+  4000 x 2000 frame.
+
+- **`zu_w_str()` is the only place a CHARSXP’s bytes are read**, as
+  `zu_mkchar()` is the only place one is made. Both refuse `CE_BYTES`,
+  because `Rf_translateCharUTF8()` answers an unknown encoding with a
+  bare `simpleError` from the R internals — the same contract break as
+  the NUL case below, from the other direction. R-side argument checks
+  (`zu_check_bytes()`) catch it on the input paths.
+
 - **NDJSON framing rests on one fact: a raw newline cannot appear inside
   a JSON string.** That is why splitting on `\n` can never cut a record,
   and why
@@ -217,11 +256,13 @@ silently not built.
   reader is also deliberately stricter than
   `YYJSON_READ_STOP_WHEN_DONE`, which would accept newline-free
   concatenated JSON the content type does not promise.
+
 - **`zu_df_plan`/`zu_df_row()` are shared by
   [`json_write()`](https://pedrobtz.github.io/zujson/reference/json_write.md)
   and NDJSON** so the two cannot disagree about how a data frame row
   becomes an object. A change to row shape belongs there, not in either
   caller.
+
 - **`ZUJSON_READ_FLAGS` is shared by every read path** so
   [`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
   and
@@ -237,8 +278,10 @@ silently not built.
   depth; the cap protects the tree builder, which validation never runs,
   and enforcing it would mean walking the document on every call to
   return `FALSE` for something RFC 8259 §9 calls valid.
+
 - **`NA_INTEGER == INT_MIN`.** A JSON `-2147483648` must promote to
   `double`, or it comes back as `NA`. Same for anything above `INT_MAX`.
+
 - **A number past double range is `Inf`, not a parse failure.** RFC 8259
   caps no magnitude, so `1e309` is valid JSON; rejecting it would let
   one absurd value make a whole response body unreadable.
@@ -252,6 +295,7 @@ silently not built.
   [`json_validate()`](https://pedrobtz.github.io/zujson/reference/json_validate.md)
   would start calling those documents valid. Every “is this a number?”
   test goes through `zu_is_num()` so `NUM` and `RAW` cannot drift apart.
+
 - **Whole doubles are written without a decimal point.** R has no
   integer literal, so `1` is a double and yyjson’s real writer emits
   `1.0`, which a schema expecting an integer rejects. The bound is
@@ -259,21 +303,26 @@ silently not built.
   integer at any magnitude, so converting is lossless; 2^53 is where
   consecutive integers stop being representable, which is a different
   question and the wrong test.
+
 - **Every string crossing into JSON goes through
   `Rf_translateCharUTF8`**, wrapped in `vmaxget`/`vmaxset` so a long
   character vector does not accumulate one R_alloc buffer per element.
   Every string coming back is marked `CE_UTF8` — accurate only because
   yyjson’s UTF-8 validation is on.
+
 - **[`I()`](https://rdrr.io/r/base/AsIs.html) is checked before the
   class dispatch**, because [`I()`](https://rdrr.io/r/base/AsIs.html)
   prepends to the class vector.
+
 - **Partial names produce an array, not `{"a":1,"":2}`.**
   `zu_fully_named()` is the one place that decides object-vs-array; it
   requires every name present, non-`NA` and non-empty.
+
 - **Conditions are built in C, not re-signalled in R.** `zu_stop()`
   attaches the class where the cause is known. R-side argument checks
   raise the same 4-element class vector so the boundary is invisible to
   a caller. Everything inherits `zujson_error`.
+
 - **[`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
   takes raw as well as character** so `zuhttp` never needs a conversion
   step, and

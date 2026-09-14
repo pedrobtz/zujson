@@ -7,6 +7,59 @@ work first. The mappings may still change if the design argues for it.
 
 ### Bug fixes
 
+- A data frame’s row objects are now charged a nesting level in both
+  directions. Parsing, they were not charged at all, so a document one
+  level too deep to parse as a list parsed as a frame; writing, a list
+  column was charged twice, so a frame whose JSON sat exactly at the
+  1000-level limit was rejected. `zujson_info()$max_depth` now means the
+  same thing whichever options are passed.
+
+- `Date` and `POSIXct` outside `0000-01-01` to `9999-12-31` now raise
+  `zujson_write_error`. Both are doubles in R, so they reach far past
+  what a timestamp can be written as: `1e300` produced
+  `"2030437271-06-06T-596523:-14:-8Z"`, and converting it to `int64_t`
+  on the way was undefined behaviour rather than merely wrong.
+
+- A string whose [`Encoding()`](https://rdrr.io/r/base/Encoding.html) is
+  `"bytes"` now raises `zujson_arg_error` when parsing and
+  `zujson_write_error` when writing, instead of the bare `simpleError`
+  that `Rf_translateCharUTF8()` raises from inside R. Everything this
+  package can fail with is a `zujson_error` again. Pass the bytes as a
+  raw vector, which is what the raw path is for.
+
+- `data_frame = TRUE` no longer drops a value when one record carries
+  the same key twice. It raises `zujson_parse_error`: a column has one
+  cell per record, and plain parsing keeps both values, so quietly
+  keeping one made an option about *shape* change *content*.
+
+### Data frames
+
+- Building a frame is now linear in the length of the input rather than
+  quadratic in the number of distinct keys. The union of the keys is
+  collected through a hash index instead of a scan of the keys so far,
+  and cells are filled by one pass over the records instead of a lookup
+  per cell that rescanned the record. A 4000 x 2000 frame went from 69s
+  to 1.6s.
+
+- The size of a frame is now capped. Because the result is rectangular,
+  its size is set by the union of the keys and not by how much JSON
+  arrived: 5000 records sharing no keys is a 5000 x 5000 frame — 96 MB —
+  from 72 kB of body, which is a denial-of-service path for a package
+  meant to be pointed at untrusted bodies. A limit on the body cannot
+  stand in for one here, because the growth is quadratic in it. More
+  than `zujson_info()$max_df_cells` cells now raises
+  `zujson_limit_error`, as the offending column appears rather than
+  after the allocation.
+
+  The default is 50 million cells, roughly 400 MB of doubles — 100k rows
+  by 200 columns is 20 million, so a real tabular response has room to
+  spare. `options(zujson.max_df_cells = )` changes it for the session,
+  and `zujson_info()$max_df_cells` reports the limit actually in force.
+
+- `simplify = "none"` takes precedence over `data_frame = TRUE`, and
+  says so. That mode’s promise is that every JSON array arrives as an R
+  list; the two options are not combined.
+
 - A number too large for any finite `double` now parses as `Inf` instead
   of failing the whole read. RFC 8259 puts no limit on the magnitude of
   a number, so `1e309` is valid JSON, and rejecting it let one absurd

@@ -12,7 +12,9 @@ zujson_info()
 
 ## Value
 
-A named list with `zujson`, `yyjson` and `max_depth`.
+A named list with `zujson`, `yyjson`, `max_depth` and `max_df_cells`.
+`max_depth` is compiled in and fixed; `max_df_cells` is the limit in
+force, which `options(zujson.max_df_cells = )` changes.
 
 ## Examples
 
@@ -26,5 +28,8 @@ zujson_info()
 #> 
 #> $max_depth
 #> [1] 1000
+#> 
+#> $max_df_cells
+#> [1] 5e+07
 #> 
 ```

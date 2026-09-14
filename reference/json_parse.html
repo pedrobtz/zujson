@@ -23,10 +23,7 @@ type is already known."></head><body>
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto"><li class="nav-item"><a class="nav-link" href="../articles/zujson.html">Get started</a></li>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
-<li class="nav-item dropdown">
-  <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
-  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/kubernetes-openapi.html">The Kubernetes API spec in JSON</a></li>
-  </ul></li>
+<li class="nav-item"><a class="nav-link" href="../articles/index.html">Articles</a></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
@@ -114,11 +111,28 @@ it follows R's own promotion, so the strings are exactly what
     <h2 id="data-frames">Data frames<a class="anchor" aria-label="anchor" href="#data-frames"></a></h2>
     <p><code>data_frame = TRUE</code> turns any non-empty array whose elements are <em>all</em>
 objects into a data frame. Columns are the union of the keys in the order
-first seen; a record missing a key contributes <code>NA</code>, so the result is
-rectangular however ragged the records are. Each column is then simplified
-with the active <code>simplify</code> mode, so a column of mixed kinds is a list column
-under <code>preserve</code> and a character column under <code>coerce</code>. It applies wherever
-such an array appears, however deeply nested.</p>
+first seen, so the result is rectangular however ragged the records are. A
+record missing a key contributes <code>NA</code> in an atomic column and <code>NULL</code> in a
+list column – the same as an explicit JSON <code>null</code> in either case, because
+"absent" and "null" are one thing once the value is in a column. Each column
+is then simplified with the active <code>simplify</code> mode, so a column of mixed
+kinds is a list column under <code>preserve</code> and a character column under
+<code>coerce</code>. It applies wherever such an array appears, however deeply nested.</p>
+<p><code>simplify = "none"</code> takes precedence: it is the mode that guarantees every
+JSON array arrives as an R list, and a data frame is not one. The two
+options are not combined, and <code>data_frame = TRUE</code> is ignored under it.</p>
+<p>Two limits apply, both raising a structured condition rather than a bare
+error. An object with the same key twice cannot become a row – a column has
+one cell per record – so it raises <code>zujson_parse_error</code> instead of silently
+keeping one of the values; plain parsing, which puts both in a list, is
+unaffected. And because the frame is rectangular, its size is set by the
+union of the keys rather than by the length of the body: records that share
+no keys at all would ask for one cell per record <em>per record</em>, and no limit
+on the size of the body can stand in for a limit on that, because the growth
+is quadratic in it. More than <code>zujson_info()$max_df_cells</code> cells raises
+<code>zujson_limit_error</code>. The default is 50 million – clear of any real tabular
+response, and far below what a hostile one reaches – and
+<code>options(zujson.max_df_cells = )</code> changes it for the session.</p>
 <p>Nesting deeper than 1000 levels is rejected with a <code>zujson_depth_error</code>,
 which is what makes the parser safe to point at an untrusted response body.</p>
 <p>A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259

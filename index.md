@@ -21,8 +21,9 @@ pak::pak("pedrobtz/zujson")
 
 [`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
 turns JSON into R objects. An array becomes an atomic vector when its
-elements agree on a type, and a list when they do not — the type is
-never coerced away.
+elements agree on a type, and a list when they do not — by default the
+type is never coerced away, though `simplify = "coerce"` opts into R’s
+own promotion when you would rather have the vector.
 
 ``` r
 
@@ -73,3 +74,14 @@ round out the set. The [getting started
 article](https://pedrobtz.github.io/zujson/articles/zujson.html) carries
 the full type mapping in both directions, the safety limits, and what
 the package deliberately does not do.
+
+## Testing
+
+zujson’s tests cover its type mapping, errors and round trips, and run
+on every pull request across five platform and R version combinations.
+Differential tests use `jsonlite` as an external oracle, while
+JSONTestSuite checks 95/95 required acceptances and 188/188 required
+rejections. Sanitizer and fuzzing jobs exercise the C boundary and
+cleanup paths. See [Testing and
+conformance](https://pedrobtz.github.io/zujson/articles/testing.html)
+for the test map, full results and intentional divergences.

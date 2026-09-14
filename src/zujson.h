@@ -24,10 +24,14 @@
  * can stand in for it, because the blow-up is quadratic in the body: a 1 MB
  * cap still admits ~75k records and so ~5.6e9 cells.
  *
- * 5e7 cells is ~400 MB of doubles: clear of any real tabular response (100k
- * rows x 200 columns is 2e7) and three orders of magnitude below what the
- * pathological body reaches. This is the default; `zujson.max_df_cells`
- * overrides it per session, and the R side is what reads that option. */
+ * 5e7 cells is ~400 MB of doubles, and the frame is not the whole peak: the
+ * scatter pass in zu_arr_df() holds an n_rows x n_keys matrix of pointers for
+ * the length of the build, whatever the sparsity, so the same order again --
+ * ~800 MB together on a 64-bit build. That is still clear of any real tabular
+ * response (100k rows x 200 columns is 2e7) and three orders of magnitude
+ * below what the pathological body reaches. This is the default;
+ * `zujson.max_df_cells` overrides it per session, and the R side is what reads
+ * that option. */
 #define ZUJSON_MAX_DF_CELLS 50000000
 
 /* ---- structured conditions (zu_cond.c) ---- */

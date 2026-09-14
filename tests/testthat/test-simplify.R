@@ -185,6 +185,41 @@ test_that("the cell budget is settable, and a bad setting is an argument error",
   }
 })
 
+test_that("a budget larger than any frame switches the limit off", {
+  ragged <- function(n) {
+    paste0("[", paste0(sprintf('{"k%d":%d}', seq_len(n), seq_len(n)),
+                       collapse = ","), "]")
+  }
+  default <- zujson_info()$max_df_cells
+
+  withr::local_options(zujson.max_df_cells = 100)
+  expect_error(json_parse(ragged(11L), data_frame = TRUE),
+               class = "zujson_limit_error")
+
+  # The documented way to switch the check off, so it is a value the clamp in
+  # zu_df_cells() has to handle rather than one R rejects. Asserting on the
+  # frame a budget of 100 just refused is what pins the *purpose*: on arm64 an
+  # unclamped cast saturates, so a weaker assertion passes for the wrong
+  # reason, and clamping to any small number satisfies "not negative" while
+  # still imposing a limit nobody asked for.
+  withr::local_options(zujson.max_df_cells = 1e300)
+  expect_identical(dim(json_parse(ragged(11L), data_frame = TRUE)),
+                   c(11L, 11L))
+
+  # Clamped, and reported clamped: what zujson_info() names is what the parser
+  # enforces, which is what makes it worth pre-flighting a body against.
+  cap <- zujson_info()$max_df_cells
+  expect_true(is.finite(cap))
+  expect_gte(cap, default)
+
+  # the ceiling is idempotent, and is a ceiling only -- anything under it is
+  # reported exactly as it was asked for
+  withr::local_options(zujson.max_df_cells = cap)
+  expect_identical(zujson_info()$max_df_cells, cap)
+  withr::local_options(zujson.max_df_cells = 12345)
+  expect_identical(zujson_info()$max_df_cells, 12345)
+})
+
 test_that("data frames nest wherever an array of objects appears", {
   x <- json_parse('{"rows":[{"a":1},{"a":2}]}', data_frame = TRUE)
   expect_s3_class(x$rows, "data.frame")

@@ -198,14 +198,25 @@ check("unwind path survived 1400 aborted parses", TRUE)
 check("the budget option was restored",
       zujson_info()$max_df_cells > 1000)
 
-# A malformed option is refused in R, before the cast to R_xlen_t that Inf
-# would make undefined.
+# A malformed option is refused in R and never reaches C.
 for (bad in list("x", 0, -1, NA_real_, Inf)) {
   opts <- options(zujson.max_df_cells = bad)
   check(paste("budget option refused:", format(bad)),
         quietly(json_parse('[{"a":1}]', data_frame = TRUE)) == "condition")
   options(opts)
 }
+
+# A well-formed one that is merely enormous is *not* refused -- that is how the
+# limit is switched off -- so it is the value that reaches the cast to
+# R_xlen_t. Unclamped, converting it is undefined, which is exactly the check
+# -fsanitize=undefined's float-cast-overflow makes: this line is what fails if
+# either clamp is removed.
+opts <- options(zujson.max_df_cells = 1e300)
+check("budget switched off",
+      quietly(json_parse('[{"a":1},{"b":2}]', data_frame = TRUE)) == "ok")
+check("switched off, the reported limit is the clamped one",
+      is.finite(zujson_info()$max_df_cells))
+options(opts)
 
 # The same key table and cell matrix on the paths that *succeed*, at a size
 # that makes the hash table resize and the matrix large enough to matter.
@@ -217,6 +228,16 @@ check("ragged frame under the budget",
       quietly(json_parse(paste0("[", paste0(sprintf('{"k%d":%d}', 1:1000, 1:1000),
                                             collapse = ","), "]"),
                          data_frame = TRUE)) == "ok")
+
+# The key index is sized by the budget wherever the budget is the tighter of
+# the two bounds, so a low limit against a wide body is where its arrays are at
+# their smallest relative to the keys offered: 90000 members, room interned for
+# three. An off-by-one in that sizing is a heap overflow, and asan sees it here
+# and nowhere else -- every other frame case leaves the arrays oversized.
+opts <- options(zujson.max_df_cells = 1000)
+check("wide frame refused with the key index at its tightest",
+      quietly(json_parse(wide, data_frame = TRUE)) == "condition")
+options(opts)
 
 cat("-- files ----------------------------------------------------------\n")
 

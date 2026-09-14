@@ -105,6 +105,13 @@ is quadratic in it. More than \code{zujson_info()$max_df_cells} cells raises
 \code{zujson_limit_error}. The default is 50 million -- clear of any real tabular
 response, and far below what a hostile one reaches -- and
 \code{options(zujson.max_df_cells = )} changes it for the session.
+\code{zujson_info()$max_df_cells} reports the limit in force.
+
+Setting it larger than any frame that could be built switches the check off;
+the option is clamped to what an \code{R_xlen_t} holds, which is what
+\code{zujson_info()$max_df_cells} then reports. Switched off, nothing bounds the
+allocation but the machine, and a body large enough to exhaust memory raises
+R's own allocation error rather than a \code{zujson_error}.
 
 Nesting deeper than 1000 levels is rejected with a \code{zujson_depth_error},
 which is what makes the parser safe to point at an untrusted response body.

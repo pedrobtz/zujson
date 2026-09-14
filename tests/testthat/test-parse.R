@@ -154,6 +154,44 @@ test_that("nesting past the depth limit is rejected rather than crashing", {
                class = "zujson_depth_error")
 })
 
+test_that("data_frame = TRUE charges the record objects a level of their own", {
+  # the array is one level and every record another, so the same document has
+  # to be accepted or rejected the same way whichever option is passed --
+  # otherwise json_write() can emit a frame json_parse() will not read back
+  limit <- zujson_info()$max_depth
+  cell <- function(k) {
+    paste0('[{"a":', strrep("[", k), "1", strrep("]", k), "}]")
+  }
+  for (total in c(limit - 1L, limit, limit + 1L)) {
+    k <- total - 2L                       # the array and the record object
+    plain <- tryCatch(json_parse(cell(k)), zujson_depth_error = function(e) e)
+    frame <- tryCatch(json_parse(cell(k), data_frame = TRUE),
+                      zujson_depth_error = function(e) e)
+    expect_identical(inherits(plain, "condition"), inherits(frame, "condition"),
+                     info = paste("total depth", total))
+    expect_identical(inherits(plain, "condition"), total > limit,
+                     info = paste("total depth", total))
+  }
+
+  # the record object counts even when nothing is nested inside it
+  deep <- paste0(strrep("[", limit), '{"a":1}', strrep("]", limit))
+  expect_error(json_parse(deep, data_frame = TRUE), class = "zujson_depth_error")
+  expect_error(json_parse(deep), class = "zujson_depth_error")
+})
+
+test_that("a string marked \"bytes\" is a structured error, not a bare one", {
+  # Rf_translateCharUTF8() raises a bare simpleError on an unknown encoding,
+  # which would escape the zujson_error contract every caller handles on
+  bytes <- "\xe4\xf6"
+  Encoding(bytes) <- "bytes"
+  expect_error(json_parse(bytes), class = "zujson_arg_error")
+  expect_error(json_validate(bytes), class = "zujson_arg_error")
+  expect_error(json_parse_file(bytes), class = "zujson_arg_error")
+  expect_error(json_parse_ndjson(bytes), class = "zujson_arg_error")
+  # the raw path is what such bytes are for, and still works
+  expect_true(json_validate(charToRaw('{"a":1}')))
+})
+
 test_that("bad arguments are rejected before reaching C", {
   expect_error(json_parse(1), class = "zujson_arg_error")
   expect_error(json_parse(NA_character_), class = "zujson_arg_error")

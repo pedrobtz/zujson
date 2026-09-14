@@ -5,7 +5,7 @@
 **Purpose:** Small, portable JSON parsing and serialization for R, designed for direct reuse by `zuhttp`
 **Implementation:** C with vendored yyjson
 **Target:** CRAN-compatible source package
-**Non-goals:** A `jsonlite` replacement, JSON Pointer/Patch/Schema, data frame reconstruction, custom serializer dispatch
+**Non-goals:** A `jsonlite` replacement, JSON Pointer/Patch/Schema, custom serializer dispatch
 
 ---
 
@@ -56,16 +56,22 @@ wants a mapping small enough to state on one page and hold in your head.
 
 ## 4. Public R API
 
-Six functions. That is the whole surface.
+Ten functions. That is the whole surface.
 
 ```r
-json_parse(x, simplify = TRUE)        # character or raw -> R
-json_parse_raw(x, simplify = TRUE)    # raw -> R
-json_parse_file(path, simplify = TRUE)
+json_parse(x, simplify = "preserve", data_frame = FALSE)   # character|raw -> R
+json_parse_raw(x, simplify = "preserve", data_frame = FALSE)
+json_parse_file(path, simplify = "preserve", data_frame = FALSE)
 json_write(x, pretty = FALSE, auto_unbox = TRUE)      # R -> character
 json_write_raw(x, pretty = FALSE, auto_unbox = TRUE)  # R -> raw
 json_validate(x)                      # character or raw -> TRUE/FALSE
-zujson_info()                         # build metadata
+
+# NDJSON (application/x-ndjson), one document per line -- see section 13
+json_parse_ndjson(x, simplify = "preserve", data_frame = FALSE)
+json_write_ndjson(x, auto_unbox = TRUE)      # list|data.frame -> character
+json_write_ndjson_raw(x, auto_unbox = TRUE)  # list|data.frame -> raw
+
+zujson_info()                         # build metadata and the limits
 ```
 
 `json_parse()` accepts raw as well as character so the common `zuhttp` call is
@@ -164,9 +170,54 @@ These were the questions left open in the earlier `jsx3` notes. v1's answers:
 7. **data.frame detection** — **implemented, opt-in**, via `data_frame = TRUE`.
    Off by default, so an array of objects is still a list of named lists unless
    asked otherwise. Columns are the union of the keys in first-seen order, a
-   record missing a key contributes `NA`, and each column simplifies with the
-   active `simplify` mode. The union rule is what makes the result rectangular
-   without the caller having to guarantee that the records agree.
+   record missing a key contributes `NA` in an atomic column and `NULL` in a
+   list column, and each column simplifies with the active `simplify` mode. The
+   union rule is what makes the result rectangular without the caller having to
+   guarantee that the records agree.
+
+   Four consequences follow from "rectangular", and all four are decisions
+   rather than accidents:
+
+   - `simplify = "none"` **wins**. That mode's whole promise is that every JSON
+     array arrives as an R list; a data frame is not one, so the options are
+     not combined and `data_frame` is ignored under it.
+   - A record with the **same key twice** raises `zujson_parse_error`. A column
+     has one cell per record, so one of the two values would have to be
+     dropped — and plain parsing keeps both, so the option would be changing
+     content rather than shape.
+   - "Absent" and "explicit `null`" are **one thing** once a value is in a
+     column, in both the atomic and the list case. A column cannot record which
+     it was without a second parallel column nobody asked for.
+   - The size of the result is set by the **union of the keys**, not by the
+     length of the body, so records that share no keys ask for one column per
+     record: 5000 such records is a 5000 x 5000 frame from 72 kB of JSON. Since
+     this runs on untrusted bodies, `ZUJSON_MAX_DF_CELLS` caps rows x columns
+     and `zujson_limit_error` is raised as the offending column appears, before
+     the allocation rather than after it.
+
+     A body-size limit upstream cannot stand in for this one. The growth is
+     quadratic in the body, so a 1 MB cap — generous for an API — still admits
+     ~75k records and so ~5.6e9 cells. Nor does leaving it uncapped degrade
+     gracefully: R's allocator raises a bare `simpleError`, which is the same
+     contract break as §7 exists to prevent, and on an overcommitting kernel
+     the process may be killed before it gets that far.
+
+     The default is 5e7 cells, ~400 MB of doubles: 100k rows x 200 columns is
+     2e7, so a real response has room, and the pathological one is bounded
+     three orders of magnitude below where it was heading. It is the one limit
+     here that is settable — `options(zujson.max_df_cells = )` — because unlike
+     the depth cap it is a budget rather than a property of the C stack, and
+     the right number depends on what the caller can afford. The option is
+     resolved and validated in R, then threaded to C in place of the
+     `data_frame` flag, so the recursion carries one value rather than two that
+     have to agree; `Inf` is refused, since the cast to `R_xlen_t` would be
+     undefined.
+
+   The two costs that are *not* capped are instead made linear in the length of
+   the input: the union of the keys is collected through an open-addressed
+   index rather than a scan of the keys so far, and the cells are filled by one
+   scattering pass over the records rather than by asking each record for each
+   key, which was a scan of that record per cell.
 8. **Objects** — always a named list, no exceptions.
 
 ### Valid JSON that R cannot hold
@@ -297,7 +348,14 @@ so a caller wrapping a whole request/response cycle handles `zujson_error` once.
 | `zujson_io_error` | `json_parse_file()` could not read the file at all |
 | `zujson_unsupported_type` | an R type or shape with no JSON form |
 | `zujson_depth_error` | nesting beyond `ZUJSON_MAX_DEPTH` |
+| `zujson_limit_error` | a `data_frame = TRUE` result beyond `ZUJSON_MAX_DF_CELLS` |
 | `zujson_arg_error` | an argument failed its check before reaching C |
+
+`zujson_limit_error` is a sibling of `zujson_depth_error` rather than a kind of
+parse error: in both cases the document is valid JSON and the refusal is about
+what building the R value would cost, which is a different thing from the input
+being malformed. Both limits are readable from `zujson_info()`, so a caller can
+tell the two apart without matching on text.
 
 Conditions are built in C (`zu_stop()` in `src/zu_cond.c`) rather than
 re-signalled in R, so the class is attached where the cause is known. Argument
@@ -338,6 +396,21 @@ A data frame is the one value that emits **two** container levels at once — th
 array of rows, and each row object — so it is charged for both. Charging it one
 lets `json_write()` emit JSON that `json_parse()` then rejects, which is the
 worst kind of bug this package can have: output it will not read back.
+
+Both halves of that are easy to get wrong by one, and in opposite directions:
+
+- **Parsing**, the row objects never pass through `zu_to_sexp()`, so nothing
+  charges for them unless `zu_arr_df()` does it explicitly. Without that, a
+  document too deep to parse as a list parses as a frame.
+- **Writing**, a cell is charged the way an object member is charged
+  everywhere else — by handing `zu_w_elt()` the level of the object that holds
+  it, and letting `zu_w_elt()` add the level itself, and only for a cell that
+  is a container. Adding one in `zu_df_row()` as well charged a list column
+  twice, which rejected a frame whose JSON sat exactly at the limit.
+
+The test for this is a nested value in a *cell*, not a frame nested inside
+lists: the outer direction is charged by the ordinary list recursion and stays
+correct either way.
 
 ## 10. Layout and naming
 

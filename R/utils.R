@@ -21,7 +21,53 @@ zu_check_string <- function(x, arg) {
     zu_abort("zujson_arg_error",
              paste0("`", arg, "` must be a single string."))
   }
+  zu_check_bytes(x, arg)
+}
+
+# "bytes" is R saying it does not know the string's encoding, and the C layer
+# reaches such a string only through Rf_translateCharUTF8(), which answers with
+# a bare simpleError raised inside R itself -- outside the zujson_error
+# contract. Refusing it here keeps every failure this package can produce a
+# zujson_error, which is what a caller handling `zujson_error` once relies on.
+# Pass the raw vector instead: bytes are exactly what the raw path takes.
+zu_check_bytes <- function(x, arg) {
+  if (any(Encoding(x) == "bytes")) {
+    zu_abort("zujson_arg_error",
+             paste0("`", arg, "` is marked \"bytes\", an unknown encoding. ",
+                    "Pass the bytes as a raw vector instead."))
+  }
   x
+}
+
+# `data_frame`, as the number the C layer threads through the recursion: 0 is
+# off, and anything else is the cell budget for the call.
+#
+# The budget is resolved here rather than in C so that the option is checked
+# where every other argument is, and so that C never has to decide what a
+# malformed option means. The compiled-in default is read once and cached: it
+# is the only copy of the number, so R and C cannot drift.
+zu_cache <- new.env(parent = emptyenv())
+
+zu_df_cells <- function() {
+  n <- getOption("zujson.max_df_cells")
+  if (is.null(n)) {
+    if (is.null(zu_cache$max_df_cells)) {
+      zu_cache$max_df_cells <- .Call(C_zujson_build_info)$max_df_cells
+    }
+    return(zu_cache$max_df_cells)
+  }
+  # Inf would make the cast to R_xlen_t in C undefined, so it is not a way to
+  # switch the limit off; a number big enough to mean that is.
+  if (!is.numeric(n) || length(n) != 1L || is.na(n) || !is.finite(n) || n < 1) {
+    zu_abort("zujson_arg_error",
+             paste0("`options(zujson.max_df_cells = )` must be a single ",
+                    "finite number of 1 or more."))
+  }
+  as.double(n)
+}
+
+zu_check_df <- function(x, arg = "data_frame") {
+  if (zu_check_flag(x, arg)) zu_df_cells() else 0
 }
 
 # Simplification mode, as an integer the C layer switches on.

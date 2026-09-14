@@ -135,10 +135,22 @@ if (any(kind == "?")) {
 # escaped NUL is valid JSON that no R string can hold, so TRUE from one and a
 # zujson_parse_error from the other is correct. Any *other* pairing is not.
 cat("\n-- json_parse() against json_validate() ---------------------------\n")
+
+# Two files, both a string containing an escaped NUL. The count is asserted
+# rather than printed: a *third* file landing here would mean json_parse() had
+# started refusing something json_validate() calls valid, which is the contract
+# drifting, not a free choice like the i_ set above.
+split_baseline <- 2L
+
 split_ok <- accepted & parsed != "ok"
 cat(sprintf("valid but unrepresentable in R: %d\n", sum(split_ok)))
 for (j in which(split_ok)) {
   cat("    ", basename(files[j]), " -> ", parsed[j], "\n", sep = "")
+}
+if (sum(split_ok) != split_baseline) {
+  bad <- bad + 1L
+  cat("CHANGED: the baseline is ", split_baseline,
+      " file(s) valid but unrepresentable\n", sep = "")
 }
 odd <- which(!accepted & parsed == "ok")
 if (length(odd)) {

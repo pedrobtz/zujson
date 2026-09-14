@@ -51,11 +51,30 @@
 #'
 #' `data_frame = TRUE` turns any non-empty array whose elements are *all*
 #' objects into a data frame. Columns are the union of the keys in the order
-#' first seen; a record missing a key contributes `NA`, so the result is
-#' rectangular however ragged the records are. Each column is then simplified
-#' with the active `simplify` mode, so a column of mixed kinds is a list column
-#' under `preserve` and a character column under `coerce`. It applies wherever
-#' such an array appears, however deeply nested.
+#' first seen, so the result is rectangular however ragged the records are. A
+#' record missing a key contributes `NA` in an atomic column and `NULL` in a
+#' list column -- the same as an explicit JSON `null` in either case, because
+#' "absent" and "null" are one thing once the value is in a column. Each column
+#' is then simplified with the active `simplify` mode, so a column of mixed
+#' kinds is a list column under `preserve` and a character column under
+#' `coerce`. It applies wherever such an array appears, however deeply nested.
+#'
+#' `simplify = "none"` takes precedence: it is the mode that guarantees every
+#' JSON array arrives as an R list, and a data frame is not one. The two
+#' options are not combined, and `data_frame = TRUE` is ignored under it.
+#'
+#' Two limits apply, both raising a structured condition rather than a bare
+#' error. An object with the same key twice cannot become a row -- a column has
+#' one cell per record -- so it raises `zujson_parse_error` instead of silently
+#' keeping one of the values; plain parsing, which puts both in a list, is
+#' unaffected. And because the frame is rectangular, its size is set by the
+#' union of the keys rather than by the length of the body: records that share
+#' no keys at all would ask for one cell per record *per record*, and no limit
+#' on the size of the body can stand in for a limit on that, because the growth
+#' is quadratic in it. More than `zujson_info()$max_df_cells` cells raises
+#' `zujson_limit_error`. The default is 50 million -- clear of any real tabular
+#' response, and far below what a hostile one reaches -- and
+#' `options(zujson.max_df_cells = )` changes it for the session.
 #'
 #' Nesting deeper than 1000 levels is rejected with a `zujson_depth_error`,
 #' which is what makes the parser safe to point at an untrusted response body.
@@ -112,7 +131,7 @@
 #' json_parse('[{"id":1,"nm":"a"},{"id":2,"nm":"b"}]', data_frame = TRUE)
 json_parse <- function(x, simplify = TRUE, data_frame = FALSE) {
   simplify <- zu_check_simplify(simplify)
-  data_frame <- zu_check_flag(data_frame, "data_frame")
+  data_frame <- zu_check_df(data_frame)
   if (is.raw(x)) {
     return(.Call(C_zujson_parse_raw, x, simplify, data_frame))
   }
@@ -130,7 +149,7 @@ json_parse_raw <- function(x, simplify = TRUE, data_frame = FALSE) {
     zu_abort("zujson_arg_error", "`x` must be a raw vector.")
   }
   .Call(C_zujson_parse_raw, x, zu_check_simplify(simplify),
-        zu_check_flag(data_frame, "data_frame"))
+        zu_check_df(data_frame))
 }
 
 #' @rdname json_parse
@@ -162,7 +181,7 @@ json_parse_file <- function(path, simplify = TRUE, data_frame = FALSE) {
              paste0("could not read '", path, "': it is a directory."))
   }
   .Call(C_zujson_parse_file, path, zu_check_simplify(simplify),
-        zu_check_flag(data_frame, "data_frame"))
+        zu_check_df(data_frame))
 }
 
 #' Check whether input is valid JSON
@@ -205,5 +224,6 @@ json_validate <- function(x) {
     zu_abort("zujson_arg_error",
              "`x` must be a single string or a raw vector.")
   }
+  zu_check_bytes(x, "x")
   .Call(C_zujson_validate_str, x)
 }

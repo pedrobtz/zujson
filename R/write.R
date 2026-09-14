@@ -34,7 +34,15 @@
 #' Every kind of missing value becomes `null`: JSON has no `NA`, and `NaN` and
 #' `Infinity` are not JSON either. `POSIXct` is always written as UTC no matter
 #' what its `tzone` says, since it is the same instant either way, and
-#' sub-second parts are dropped.
+#' sub-second parts are dropped. Both are doubles in R and so reach much
+#' further than a timestamp can be written: outside `0000-01-01` to
+#' `9999-12-31`, the four-digit years ISO 8601 allows, they raise a
+#' `zujson_write_error` rather than print a year no API can parse.
+#'
+#' A string whose `Encoding()` is `"bytes"` also raises a `zujson_write_error`.
+#' That marking is R saying it does not know the encoding, and JSON text is
+#' UTF-8 by definition, so there is nothing to convert from. Every other
+#' encoding R tracks is converted on the way out.
 #'
 #' Doubles are written compactly and always read back as the same number, so
 #' `0.1` is `0.1` rather than `0.10000000000000001`. A double that is a whole

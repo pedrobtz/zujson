@@ -76,11 +76,27 @@ static yyjson_mut_val *zu_w_dbl(zu_wctx *ctx, double v) {
     return zu_ok(yyjson_mut_real(ctx->doc, v));
 }
 
+/* A name being quoted back inside an error message, where throwing a second
+ * condition on the way out of the first would lose the real one. */
+static const char *zu_char_msg(SEXP s) {
+    return Rf_getCharCE(s) == CE_BYTES ? "<bytes>" : Rf_translateCharUTF8(s);
+}
+
 /* translateCharUTF8 is a no-op for UTF-8 and ASCII, and converts otherwise.
  * When it does convert it allocates on the R_alloc stack, so the vmax pair
- * keeps a long character vector from accumulating one buffer per element. */
+ * keeps a long character vector from accumulating one buffer per element.
+ *
+ * "bytes" is refused before it gets there: it means R does not know the
+ * encoding, and translateCharUTF8() answers that with a bare simpleError
+ * raised inside R, which would escape the zujson_error contract. This is the
+ * only place a string's bytes are read on the way out, the way zu_mkchar() is
+ * the only place one is made on the way in, so the two cannot drift. */
 static yyjson_mut_val *zu_w_str(zu_wctx *ctx, SEXP s) {
     if (s == NA_STRING) return zu_ok(yyjson_mut_null(ctx->doc));
+    if (Rf_getCharCE(s) == CE_BYTES)
+        zu_stop("zujson_write_error",
+                "a string is marked \"bytes\", an unknown encoding that "
+                "cannot be converted to the UTF-8 JSON requires");
     const void *vmax = vmaxget();
     const char *u = Rf_translateCharUTF8(s);
     yyjson_mut_val *v = yyjson_mut_strncpy(ctx->doc, u, strlen(u));
@@ -112,10 +128,31 @@ static void zu_civil(int64_t z, int *yy, int *mm, int *dd) {
     *dd = (int) d;
 }
 
+/* The days-from-epoch either side of the four-digit years ISO 8601 writes:
+ * 0000-01-01 and 9999-12-31. R's Date and POSIXct are doubles and hold far
+ * more than that, and a value past the range is two separate problems --
+ * converting it to int64_t at all is undefined behaviour once it is outside
+ * that type, and even where it is not, the year overruns "%04d" and the
+ * seconds-of-day arithmetic loses enough precision to print fields like
+ * "T-596523:-14:-8". Neither is a timestamp any API can read, so it is a write
+ * error rather than an approximation. */
+#define ZU_DAY_MIN (-719528.0)
+#define ZU_DAY_MAX ( 2932896.0)
+
+static void zu_check_day(double days, const char *what) {
+    if (!(days >= ZU_DAY_MIN && days <= ZU_DAY_MAX))
+        zu_stop("zujson_write_error",
+                "a %s of %.17g days from 1970-01-01 is outside the "
+                "0000-01-01 to 9999-12-31 range ISO 8601 can write", what,
+                days);
+}
+
 static yyjson_mut_val *zu_w_date(zu_wctx *ctx, double days) {
     if (!R_FINITE(days)) return zu_ok(yyjson_mut_null(ctx->doc));
+    days = floor(days);
+    zu_check_day(days, "Date");
     int y, m, d;
-    zu_civil((int64_t) floor(days), &y, &m, &d);
+    zu_civil((int64_t) days, &y, &m, &d);
     char buf[32];
     int n = snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
     return zu_w_text(ctx, buf, (size_t) n);
@@ -127,6 +164,7 @@ static yyjson_mut_val *zu_w_date(zu_wctx *ctx, double days) {
 static yyjson_mut_val *zu_w_time(zu_wctx *ctx, double secs) {
     if (!R_FINITE(secs)) return zu_ok(yyjson_mut_null(ctx->doc));
     double fdays = floor(secs / 86400.0);
+    zu_check_day(fdays, "POSIXct");
     int rem = (int) (secs - fdays * 86400.0);
     int y, m, d;
     zu_civil((int64_t) fdays, &y, &m, &d);
@@ -222,7 +260,7 @@ static void zu_obj_add(yyjson_mut_val *obj, SEXP nms, R_xlen_t i,
      * though zu_fully_named() should already have made it impossible. */
     if (!yyjson_mut_obj_add(obj, key, val))
         zu_stop("zujson_write_error", "could not add key '%s' to a JSON object",
-                Rf_translateCharUTF8(STRING_ELT(nms, i)));
+                zu_char_msg(STRING_ELT(nms, i)));
 }
 
 /* ---- data frames --------------------------------------------------------- */
@@ -265,11 +303,11 @@ static void zu_df_plan_init(SEXP df, zu_df_plan *plan) {
         if (Rf_inherits(col, "data.frame"))
             zu_stop("zujson_unsupported_type",
                     "column '%s' is itself a data frame, which is not supported",
-                    Rf_translateCharUTF8(STRING_ELT(nms, j)));
+                    zu_char_msg(STRING_ELT(nms, j)));
         if (XLENGTH(col) != nrow)
             zu_stop("zujson_unsupported_type",
                     "column '%s' has %ld rows, expected %ld",
-                    Rf_translateCharUTF8(STRING_ELT(nms, j)),
+                    zu_char_msg(STRING_ELT(nms, j)),
                     (long) XLENGTH(col), (long) nrow);
         SEXP lv;
         kinds[j] = zu_atom_kind(col, &lv);
@@ -286,10 +324,14 @@ static yyjson_mut_val *zu_df_row(SEXP df, const zu_df_plan *plan, R_xlen_t i,
                                  zu_wctx *ctx, int depth) {
     yyjson_mut_val *row = zu_ok(yyjson_mut_obj(ctx->doc));
     for (R_xlen_t j = 0; j < plan->ncol; j++) {
-        /* depth + 1: the cell sits inside the row object. */
+        /* `depth`, not depth + 1: a cell is charged the way an object member
+         * is everywhere else, by handing zu_w_elt() the level of the object
+         * holding it. zu_w_elt() adds the level itself, and only for a cell
+         * that is a container. Adding one here too charged a list column
+         * twice, which rejected a frame whose JSON was exactly at the limit. */
         yyjson_mut_val *v = zu_w_elt(VECTOR_ELT(df, j), plan->kinds[j],
                                      VECTOR_ELT(plan->levels, j),
-                                     i, ctx, depth + 1);
+                                     i, ctx, depth);
         zu_obj_add(row, plan->nms, j, v, ctx);
     }
     return row;

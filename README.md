@@ -25,8 +25,9 @@ pak::pak("pedrobtz/zujson")
 ## Usage
 
 `json_parse()` turns JSON into R objects. An array becomes an atomic vector when
-its elements agree on a type, and a list when they do not — the type is never
-coerced away.
+its elements agree on a type, and a list when they do not — by default the type
+is never coerced away, though `simplify = "coerce"` opts into R's own promotion
+when you would rather have the vector.
 
 ``` r
 library(zujson)

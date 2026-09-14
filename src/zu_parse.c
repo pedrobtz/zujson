@@ -456,8 +456,12 @@ static void zu_keyset_init(zu_keyset *ks, R_xlen_t cap, R_xlen_t n_rows,
      * the budget, and the budget bounded none of the difference.
      *
      * Taking the smaller of the two cannot under-allocate: n_keys stops at
-     * cells / n_rows, and `slot` stays at least twice that, which is what
-     * keeps the probe in zu_key_find() terminating. */
+     * cells / n_rows, and `slot` stays at least twice that. That factor of two
+     * is what keeps the intern loop in zu_collect_keys() terminating -- the
+     * one probe here that walks until it finds an empty slot, and so the one
+     * that would spin forever on a table with no empty slot left.
+     * zu_key_find() does not need it, since it is only ever asked for a key
+     * already interned and stops on the match. */
     R_xlen_t bound = n_rows > 0 ? cells / n_rows : cap;
     size_t n = (size_t) (cap < bound ? cap : bound), want = 8;
     if (n < 1) n = 1;

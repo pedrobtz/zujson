@@ -209,13 +209,16 @@ for (bad in list("x", 0, -1, NA_real_, Inf)) {
 # A well-formed one that is merely enormous is *not* refused -- that is how the
 # limit is switched off -- so it is the value that reaches the cast to
 # R_xlen_t. Unclamped, converting it is undefined, which is exactly the check
-# -fsanitize=undefined's float-cast-overflow makes: this line is what fails if
-# either clamp is removed.
+# -fsanitize=undefined's float-cast-overflow makes. The two clamps are
+# defence in depth, so this line fails only with *both* removed; the check
+# below is what fails when the one in zu_df_cells() goes on its own, since
+# without it the option is reported back at the 1e300 it was set to rather
+# than at the ceiling the parser will enforce.
 opts <- options(zujson.max_df_cells = 1e300)
 check("budget switched off",
       quietly(json_parse('[{"a":1},{"b":2}]', data_frame = TRUE)) == "ok")
 check("switched off, the reported limit is the clamped one",
-      is.finite(zujson_info()$max_df_cells))
+      identical(zujson_info()$max_df_cells, zujson:::zu_build_info()$max_xlen))
 options(opts)
 
 # The same key table and cell matrix on the paths that *succeed*, at a size
@@ -230,11 +233,18 @@ check("ragged frame under the budget",
                          data_frame = TRUE)) == "ok")
 
 # The key index is sized by the budget wherever the budget is the tighter of
-# the two bounds, so a low limit against a wide body is where its arrays are at
-# their smallest relative to the keys offered: 90000 members, room interned for
-# three. An off-by-one in that sizing is a heap overflow, and asan sees it here
-# and nowhere else -- every other frame case leaves the arrays oversized.
-opts <- options(zujson.max_df_cells = 1000)
+# the two bounds, so a low limit against a wide body is where its arrays are
+# at their smallest relative to the keys offered: 90000 members, room interned
+# for seventeen. An off-by-one in that sizing is a heap overflow, and this is
+# where asan can see it -- every other frame case leaves the arrays oversized.
+#
+# The budget is 5100 rather than something tighter for asan's sake, not the
+# index's. R_alloc serves a request of 128 data bytes or less from R's pooled
+# small-vector nodes, several to a malloc'd page, where an overrun lands in a
+# neighbouring node and asan has no redzone to trip. 5100 / 300 rows is 17
+# columns, which puts all three arrays (17 x 16, 17 x 8, 64 x 8 bytes) past
+# that threshold and onto individually malloc'd blocks that asan does police.
+opts <- options(zujson.max_df_cells = 5100)
 check("wide frame refused with the key index at its tightest",
       quietly(json_parse(wide, data_frame = TRUE)) == "condition")
 options(opts)

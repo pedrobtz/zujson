@@ -10,6 +10,16 @@
  * ?json_parse for the full table.
  * ------------------------------------------------------------------------- */
 
+/* `data_frame` arrives as one number rather than a flag: 0 is off, and any
+ * other value is the cell budget in force for this call, which the R side has
+ * already resolved from the `zujson.max_df_cells` option. Carrying the budget
+ * in place of the flag keeps one value threaded through the recursion instead
+ * of two that must agree, and every "is data_frame on?" test still reads as
+ * one. R has checked it is a finite number >= 1, so the cast is defined. */
+static R_xlen_t zu_df_arg(SEXP df_) {
+    return (R_xlen_t) Rf_asReal(df_);
+}
+
 /* Array element kinds, ordered so that the numeric family promotes by taking
  * the maximum: null < logical < integer < double. Strings are a separate kind
  * that only tolerates nulls, and anything else falls back to a list. */
@@ -215,7 +225,8 @@ static void zu_tick(void) {
 
 /* ---- recursive builder --------------------------------------------------- */
 
-static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, int df, int depth);
+static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, R_xlen_t df, int depth);
+static void zu_check_depth(int depth);
 
 /* Fill a character vector from an array that also holds numbers or booleans.
  * Only reachable under ZU_S_COERCE, since PRESERVE makes that array a list.
@@ -311,7 +322,7 @@ static SEXP zu_arr_atomic(yyjson_val *arr, zu_kind kind) {
     return out;
 }
 
-static SEXP zu_arr_list(yyjson_val *arr, zu_mode mode, int df, int depth) {
+static SEXP zu_arr_list(yyjson_val *arr, zu_mode mode, R_xlen_t df, int depth) {
     R_xlen_t n = (R_xlen_t) yyjson_arr_size(arr);
     SEXP out = PROTECT(Rf_allocVector(VECSXP, n));
     size_t idx, max;
@@ -324,7 +335,7 @@ static SEXP zu_arr_list(yyjson_val *arr, zu_mode mode, int df, int depth) {
     return out;
 }
 
-static SEXP zu_obj(yyjson_val *obj, zu_mode mode, int df, int depth) {
+static SEXP zu_obj(yyjson_val *obj, zu_mode mode, R_xlen_t df, int depth) {
     R_xlen_t n = (R_xlen_t) yyjson_obj_size(obj);
     SEXP out = PROTECT(Rf_allocVector(VECSXP, n));
     SEXP nms = PROTECT(Rf_allocVector(STRSXP, n));
@@ -375,14 +386,82 @@ static int zu_arr_all_obj(yyjson_val *arr) {
 
 typedef struct { const char *dat; size_t len; } zu_key;
 
-/* The union of the keys, first-seen order.
+/* The frame is rectangular however ragged the records are, so the allocation
+ * is set by the union of the keys rather than by how much JSON arrived. That
+ * product is the one cost here not already bounded by the length of the input,
+ * so it is checked as each new column appears -- before the allocation, not
+ * after it. */
+static void zu_df_budget(R_xlen_t n_keys, R_xlen_t n_rows, R_xlen_t cells) {
+    if (n_rows > 0 && n_keys > cells / n_rows)
+        zu_stop("zujson_limit_error",
+                "a data frame of %lld records x %lld columns is over the "
+                "%lld cell limit",
+                (long long) n_rows, (long long) n_keys, (long long) cells);
+}
+
+/* FNV-1a over the key's bytes: no allocation, and enough spread for the short
+ * keys a response body carries. */
+static uint64_t zu_key_hash(const char *d, size_t n) {
+    uint64_t h = 14695981039346656037ULL;
+    size_t i;
+    for (i = 0; i < n; i++) {
+        h ^= (unsigned char) d[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+/* The union of the keys, in first-seen order, which is the column order.
  *
- * Dedup is a linear scan. Records in a real response share a key set, so this
- * is O(rows x cols); a hostile body where every record invents new keys makes
- * it quadratic in the number of distinct keys, which is why the loop ticks the
- * interrupt check rather than running unbounded. */
-static R_xlen_t zu_collect_keys(yyjson_val *arr, zu_key *keys, R_xlen_t cap) {
-    R_xlen_t n_keys = 0, i;
+ * The index is open-addressed rather than a scan of the keys collected so far.
+ * Records in a real response share a key set, so the scan was usually cheap,
+ * but a body where every record invents a new key made it quadratic in the
+ * number of distinct keys -- and this runs on untrusted input.
+ *
+ * `row` holds the record that last carried each key, which is what makes a
+ * duplicate member free to spot: the same key twice for the same record means
+ * that object has it twice. */
+typedef struct {
+    zu_key   *keys;
+    R_xlen_t *row;
+    R_xlen_t *slot;               /* hash -> key index + 1; 0 is empty */
+    size_t    mask;
+    R_xlen_t  n_keys;
+    R_xlen_t  n_rows;
+    R_xlen_t  cells;              /* the budget in force for this call */
+} zu_keyset;
+
+/* R_alloc throughout: freed when .Call returns, including on the longjmp out
+ * of zu_stop(), which a malloc here would leak. */
+static void zu_keyset_init(zu_keyset *ks, R_xlen_t cap, R_xlen_t n_rows,
+                           R_xlen_t cells) {
+    size_t n = (size_t) (cap > 0 ? cap : 1), want = 8;
+    while (want < n * 2) want <<= 1;
+
+    ks->keys = (zu_key *)   R_alloc(n, sizeof(zu_key));
+    ks->row  = (R_xlen_t *) R_alloc(n, sizeof(R_xlen_t));
+    ks->slot = (R_xlen_t *) R_alloc(want, sizeof(R_xlen_t));
+    memset(ks->slot, 0, want * sizeof(R_xlen_t));
+    ks->mask = want - 1;
+    ks->n_keys = 0;
+    ks->n_rows = n_rows;
+    ks->cells = cells;
+}
+
+/* The column a key belongs to. Only ever called for a key zu_collect_keys()
+ * already interned, so the probe always terminates on a match. */
+static R_xlen_t zu_key_find(const zu_keyset *ks, const char *d, size_t len) {
+    size_t i = (size_t) zu_key_hash(d, len) & ks->mask;
+    for (;;) {
+        R_xlen_t k = ks->slot[i] - 1;
+        if (ks->keys[k].len == len && memcmp(ks->keys[k].dat, d, len) == 0)
+            return k;
+        i = (i + 1) & ks->mask;
+    }
+}
+
+static void zu_collect_keys(yyjson_val *arr, zu_keyset *ks) {
+    R_xlen_t r = 0;
     size_t idx, max;
     yyjson_val *row;
 
@@ -393,22 +472,35 @@ static R_xlen_t zu_collect_keys(yyjson_val *arr, zu_key *keys, R_xlen_t cap) {
         while ((key = yyjson_obj_iter_next(&iter)) != NULL) {
             const char *kd = yyjson_get_str(key);
             size_t kl = yyjson_get_len(key);
-            int seen = 0;
+            size_t i = (size_t) zu_key_hash(kd, kl) & ks->mask;
+            R_xlen_t k;
             zu_tick();
-            for (i = 0; i < n_keys; i++) {
-                if (keys[i].len == kl && memcmp(keys[i].dat, kd, kl) == 0) {
-                    seen = 1;
-                    break;
-                }
+            while (ks->slot[i]) {
+                k = ks->slot[i] - 1;
+                if (ks->keys[k].len == kl &&
+                    memcmp(ks->keys[k].dat, kd, kl) == 0) break;
+                i = (i + 1) & ks->mask;
             }
-            if (!seen && n_keys < cap) {
-                keys[n_keys].dat = kd;
-                keys[n_keys].len = kl;
-                n_keys++;
+            if (ks->slot[i]) {                 /* already a column */
+                k = ks->slot[i] - 1;
+                if (ks->row[k] == r)
+                    zu_stop("zujson_parse_error",
+                            "record %lld has the key \"%.*s\" twice, and a "
+                            "data frame column can hold only one value",
+                            (long long) (r + 1),
+                            (int) (kl > 64 ? 64 : kl), kd);
+                ks->row[k] = r;
+            } else {                           /* a column not seen before */
+                zu_df_budget(ks->n_keys + 1, ks->n_rows, ks->cells);
+                k = ks->n_keys++;
+                ks->keys[k].dat = kd;
+                ks->keys[k].len = kl;
+                ks->row[k] = r;
+                ks->slot[i] = k + 1;
             }
         }
+        r++;
     }
-    return n_keys;
 }
 
 /* One column, as an atomic vector. A NULL entry is a key the record did not
@@ -491,54 +583,85 @@ static SEXP zu_col_atomic(yyjson_val **vals, R_xlen_t n, zu_kind kind) {
     return out;
 }
 
-static SEXP zu_arr_df(yyjson_val *arr, zu_mode mode, int df, int depth) {
+static SEXP zu_arr_df(yyjson_val *arr, zu_mode mode, R_xlen_t df, int depth) {
     R_xlen_t n_rows = (R_xlen_t) yyjson_arr_size(arr);
     R_xlen_t cap = 0, n_keys, c, r;
     size_t idx, max;
     yyjson_val *row, **vals;
-    zu_key *keys;
+    zu_keyset ks;
     SEXP out, nms, rn;
+
+    /* The records are a container level of their own -- the array sits at
+     * `depth` and every record at `depth + 1` -- and nothing else charges for
+     * them, because a record never goes through zu_to_sexp(). Without this the
+     * same document is too deep to parse as a list and shallow enough to parse
+     * as a frame. */
+    zu_check_depth(depth + 1);
 
     yyjson_arr_foreach(arr, idx, max, row)
         cap += (R_xlen_t) yyjson_obj_size(row);
 
-    /* R_alloc: freed when .Call returns, including on the longjmp out of
-     * zu_stop(), which a malloc here would leak. */
-    keys = (zu_key *) R_alloc((size_t) (cap > 0 ? cap : 1), sizeof(zu_key));
-    n_keys = zu_collect_keys(arr, keys, cap);
+    zu_keyset_init(&ks, cap, n_rows, df);
+    zu_collect_keys(arr, &ks);
+    n_keys = ks.n_keys;
 
     out = PROTECT(Rf_allocVector(VECSXP, n_keys));
     nms = PROTECT(Rf_allocVector(STRSXP, n_keys));
-    vals = (yyjson_val **) R_alloc((size_t) (n_rows > 0 ? n_rows : 1),
+
+    /* Column-major cells, NULL where a record did not carry the key, filled
+     * by one pass over the records.
+     *
+     * Asking each record for each key instead -- yyjson_obj_getn() per cell --
+     * reads better but is a scan of that record's members every time, so a
+     * body of wide records costs records x columns x columns. Scattering is
+     * one lookup per member that actually exists. The matrix is what the cell
+     * budget above is really bounding: it is the same order as the frame. */
+    vals = (yyjson_val **) R_alloc((size_t) (n_rows * n_keys > 0
+                                             ? n_rows * n_keys : 1),
                                    sizeof(yyjson_val *));
+    memset(vals, 0, (size_t) (n_rows * n_keys) * sizeof(yyjson_val *));
+
+    r = 0;
+    yyjson_arr_foreach(arr, idx, max, row) {
+        yyjson_obj_iter iter;
+        yyjson_val *key;
+        yyjson_obj_iter_init(row, &iter);
+        while ((key = yyjson_obj_iter_next(&iter)) != NULL) {
+            c = zu_key_find(&ks, yyjson_get_str(key), yyjson_get_len(key));
+            vals[c * n_rows + r] = yyjson_obj_iter_get_val(key);
+            zu_tick();
+        }
+        r++;
+    }
 
     for (c = 0; c < n_keys; c++) {
+        yyjson_val **col_vals = vals + c * n_rows;
         zu_lat st = ZU_LAT_INIT;
         int atomic = 1;
         zu_kind kind;
 
-        r = 0;
-        yyjson_arr_foreach(arr, idx, max, row)
-            vals[r++] = yyjson_obj_getn(row, keys[c].dat, keys[c].len);
-
         for (r = 0; r < n_rows; r++) {
-            zu_kind k = vals[r] ? zu_val_kind(vals[r]) : ZU_K_NULL;
+            zu_kind k = col_vals[r] ? zu_val_kind(col_vals[r]) : ZU_K_NULL;
             if (!zu_lat_step(&st, k, mode)) { atomic = 0; break; }
         }
         kind = zu_lat_finish(&st);
 
         if (atomic) {
-            SET_VECTOR_ELT(out, c, zu_col_atomic(vals, n_rows, kind));
+            SET_VECTOR_ELT(out, c, zu_col_atomic(col_vals, n_rows, kind));
         } else {
             SEXP col = PROTECT(Rf_allocVector(VECSXP, n_rows));
             for (r = 0; r < n_rows; r++)
+                /* depth + 2: the array is at `depth`, the record holding
+                 * this cell at `depth + 1`, so a container here is the next
+                 * level again. */
                 SET_VECTOR_ELT(col, r,
-                               vals[r] ? zu_to_sexp(vals[r], mode, df, depth + 1)
-                                       : R_NilValue);
+                               col_vals[r]
+                                   ? zu_to_sexp(col_vals[r], mode, df, depth + 2)
+                                   : R_NilValue);
             SET_VECTOR_ELT(out, c, col);
             UNPROTECT(1);
         }
-        SET_STRING_ELT(nms, c, zu_mkchar(keys[c].dat, keys[c].len,
+        SET_STRING_ELT(nms, c, zu_mkchar(ks.keys[c].dat, ks.keys[c].len,
                                          "an object key"));
     }
 
@@ -563,7 +686,7 @@ static void zu_check_depth(int depth) {
                 "JSON nests deeper than %d levels", ZUJSON_MAX_DEPTH);
 }
 
-static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, int df, int depth) {
+static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, R_xlen_t df, int depth) {
     zu_tick();
     switch (yyjson_get_type(v)) {
     case YYJSON_TYPE_NULL: return R_NilValue;
@@ -603,7 +726,7 @@ static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, int df, int depth) {
 
 /* The doc is handed to R before any SEXP is allocated: zu_stop() and R's
  * allocators both longjmp, and a bare yyjson_doc * would leak on either. */
-static SEXP zu_finish(yyjson_doc *doc, zu_mode mode, int df) {
+static SEXP zu_finish(yyjson_doc *doc, zu_mode mode, R_xlen_t df) {
     zu_n_vals = 0;
     SEXP owner = PROTECT(zu_extptr_own_doc(doc));
     SEXP out = PROTECT(zu_to_sexp(yyjson_doc_get_root(doc), mode, df, 1));
@@ -631,7 +754,8 @@ static SEXP zu_finish(yyjson_doc *doc, zu_mode mode, int df) {
  * shares this flag set, it would start calling those documents valid. */
 #define ZUJSON_READ_FLAGS (YYJSON_READ_ALLOW_BOM | YYJSON_READ_BIGNUM_AS_RAW)
 
-static SEXP zu_read_mem(const char *dat, size_t len, zu_mode mode, int df) {
+static SEXP zu_read_mem(const char *dat, size_t len, zu_mode mode,
+                        R_xlen_t df) {
     yyjson_read_err err;
     /* No YYJSON_READ_INSITU: yyjson copies into its own buffer, so R's
      * immutable CHAR()/RAW() data is never written through. */
@@ -651,12 +775,12 @@ SEXP zujson_parse_str(SEXP x_, SEXP simplify_, SEXP df_) {
      * converts a latin1 or native-encoded string otherwise. */
     const char *dat = Rf_translateCharUTF8(s);
     return zu_read_mem(dat, strlen(dat), (zu_mode) Rf_asInteger(simplify_),
-                       Rf_asLogical(df_));
+                       zu_df_arg(df_));
 }
 
 SEXP zujson_parse_raw(SEXP x_, SEXP simplify_, SEXP df_) {
     return zu_read_mem((const char *) RAW(x_), (size_t) XLENGTH(x_),
-                       (zu_mode) Rf_asInteger(simplify_), Rf_asLogical(df_));
+                       (zu_mode) Rf_asInteger(simplify_), zu_df_arg(df_));
 }
 
 SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_) {
@@ -672,7 +796,7 @@ SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_) {
         zu_stop("zujson_parse_error", "invalid JSON in '%s' at byte %lu: %s",
                 path, (unsigned long) err.pos, err.msg);
     }
-    return zu_finish(doc, (zu_mode) Rf_asInteger(simplify_), Rf_asLogical(df_));
+    return zu_finish(doc, (zu_mode) Rf_asInteger(simplify_), zu_df_arg(df_));
 }
 
 /* Validation parses and throws the tree away: yyjson has no cheaper
@@ -729,7 +853,8 @@ static void zu_line_bounds(const char *dat, size_t len, size_t i,
     *stop = j;
 }
 
-static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode, int df) {
+static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
+                           R_xlen_t df) {
     size_t i, stop, next;
 
     /* Counted first so the result can be allocated exactly once. Scanning for
@@ -777,11 +902,11 @@ SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_, SEXP df_) {
         zu_stop("zujson_parse_error", "`x` is NA, not NDJSON text");
     const char *dat = Rf_translateCharUTF8(s);
     return zu_read_ndjson(dat, strlen(dat), (zu_mode) Rf_asInteger(simplify_),
-                          Rf_asLogical(df_));
+                          zu_df_arg(df_));
 }
 
 SEXP zujson_parse_ndjson_raw(SEXP x_, SEXP simplify_, SEXP df_) {
     return zu_read_ndjson((const char *) RAW(x_), (size_t) XLENGTH(x_),
                           (zu_mode) Rf_asInteger(simplify_),
-                          Rf_asLogical(df_));
+                          zu_df_arg(df_));
 }

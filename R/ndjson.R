@@ -53,7 +53,7 @@
 #' identical(json_parse_ndjson(json_write_ndjson(recs)), recs)
 json_parse_ndjson <- function(x, simplify = TRUE, data_frame = FALSE) {
   simplify <- zu_check_simplify(simplify)
-  data_frame <- zu_check_flag(data_frame, "data_frame")
+  data_frame <- zu_check_df(data_frame)
   if (is.raw(x)) {
     return(.Call(C_zujson_parse_ndjson_raw, x, simplify, data_frame))
   }

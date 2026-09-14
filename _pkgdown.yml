@@ -1,3 +1,10 @@
 url: https://pedrobtz.github.io/zujson/
 template:
   bootstrap: 5
+
+articles:
+- title: Articles
+  contents:
+  - articles/zujson
+  - articles/testing
+  - articles/kubernetes-openapi

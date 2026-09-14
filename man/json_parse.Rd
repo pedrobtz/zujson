@@ -81,11 +81,30 @@ it follows R's own promotion, so the strings are exactly what
 \section{Data frames}{
 \code{data_frame = TRUE} turns any non-empty array whose elements are \emph{all}
 objects into a data frame. Columns are the union of the keys in the order
-first seen; a record missing a key contributes \code{NA}, so the result is
-rectangular however ragged the records are. Each column is then simplified
-with the active \code{simplify} mode, so a column of mixed kinds is a list column
-under \code{preserve} and a character column under \code{coerce}. It applies wherever
-such an array appears, however deeply nested.
+first seen, so the result is rectangular however ragged the records are. A
+record missing a key contributes \code{NA} in an atomic column and \code{NULL} in a
+list column -- the same as an explicit JSON \code{null} in either case, because
+"absent" and "null" are one thing once the value is in a column. Each column
+is then simplified with the active \code{simplify} mode, so a column of mixed
+kinds is a list column under \code{preserve} and a character column under
+\code{coerce}. It applies wherever such an array appears, however deeply nested.
+
+\code{simplify = "none"} takes precedence: it is the mode that guarantees every
+JSON array arrives as an R list, and a data frame is not one. The two
+options are not combined, and \code{data_frame = TRUE} is ignored under it.
+
+Two limits apply, both raising a structured condition rather than a bare
+error. An object with the same key twice cannot become a row -- a column has
+one cell per record -- so it raises \code{zujson_parse_error} instead of silently
+keeping one of the values; plain parsing, which puts both in a list, is
+unaffected. And because the frame is rectangular, its size is set by the
+union of the keys rather than by the length of the body: records that share
+no keys at all would ask for one cell per record \emph{per record}, and no limit
+on the size of the body can stand in for a limit on that, because the growth
+is quadratic in it. More than \code{zujson_info()$max_df_cells} cells raises
+\code{zujson_limit_error}. The default is 50 million -- clear of any real tabular
+response, and far below what a hostile one reaches -- and
+\code{options(zujson.max_df_cells = )} changes it for the session.
 
 Nesting deeper than 1000 levels is rejected with a \code{zujson_depth_error},
 which is what makes the parser safe to point at an untrusted response body.

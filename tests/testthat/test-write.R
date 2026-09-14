@@ -225,6 +225,64 @@ test_that("a data frame is charged for both container levels it emits", {
   expect_error(json_write(nest(limit - 1L)), class = "zujson_depth_error")
 })
 
+test_that("a data frame cell is charged the level it actually occupies", {
+  # the cell sits inside the row object, which sits inside the array: charging
+  # it twice rejected a frame whose JSON was exactly at the limit
+  limit <- zujson_info()$max_depth
+  nest <- function(k) { x <- 1L; for (i in seq_len(k)) x <- list(x); x }
+  cell <- function(k) {
+    d <- data.frame(id = 1L)
+    d$a <- I(list(nest(k)))
+    d
+  }
+  # emitted depth is k + 2: the array, the row object, then the cell
+  at_limit <- json_write(cell(limit - 2L))
+  expect_no_error(json_parse(at_limit))
+  expect_error(json_write(cell(limit - 1L)), class = "zujson_depth_error")
+})
+
+test_that("a timestamp outside four-digit years is a write error", {
+  # Date and POSIXct are doubles, so they reach far past what ISO 8601 can
+  # write -- and past what the conversion to int64 is even defined for
+  expect_identical(json_write(structure(-719528, class = "Date")),
+                   '"0000-01-01"')
+  expect_identical(json_write(structure(2932896, class = "Date")),
+                   '"9999-12-31"')
+  expect_error(json_write(structure(-719529, class = "Date")),
+               class = "zujson_write_error")
+  expect_error(json_write(structure(2932897, class = "Date")),
+               class = "zujson_write_error")
+  expect_error(json_write(structure(1e300, class = "Date")),
+               class = "zujson_write_error")
+
+  expect_identical(json_write(.POSIXct(-62167219200, tz = "UTC")),
+                   '"0000-01-01T00:00:00Z"')
+  expect_identical(json_write(.POSIXct(253402300799, tz = "UTC")),
+                   '"9999-12-31T23:59:59Z"')
+  expect_error(json_write(.POSIXct(253402300800, tz = "UTC")),
+               class = "zujson_write_error")
+  expect_error(json_write(.POSIXct(-1e300, tz = "UTC")),
+               class = "zujson_write_error")
+
+  # NA is still null rather than an error, and one bad element is enough
+  expect_identical(json_write(.POSIXct(NA_real_, tz = "UTC")), "null")
+  expect_error(json_write(structure(c(0, 1e300), class = "Date")),
+               class = "zujson_write_error")
+})
+
+test_that("a string marked \"bytes\" is a write error, not a bare one", {
+  # "bytes" means R does not know the encoding, and JSON text is UTF-8 by
+  # definition, so translateCharUTF8() would raise a bare simpleError
+  bytes <- "\xe4\xf6"
+  Encoding(bytes) <- "bytes"
+  expect_error(json_write(bytes), class = "zujson_write_error")
+  expect_error(json_write(list(a = bytes)), class = "zujson_write_error")
+  expect_error(json_write(stats::setNames(list(1), bytes)),
+               class = "zujson_write_error")
+  expect_error(json_write(data.frame(x = bytes)), class = "zujson_write_error")
+  expect_error(json_write_raw(bytes), class = "zujson_error")
+})
+
 test_that("a string that is not the UTF-8 it claims to be is a write error", {
   # reachable from ordinary input, so the class has to be part of the contract
   bad <- rawToChar(as.raw(c(0x61, 0xff, 0x62)))

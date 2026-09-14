@@ -141,7 +141,22 @@ write_vals <- list(
   as.POSIXct("2026-09-08 12:00:00", tz = "UTC"),
   data.frame(id = 1:20, nm = letters[1:20], stringsAsFactors = FALSE),
   c(a = 1, b = 2), NA, NaN, Inf, -Inf, NULL, list(),
-  structure(1:3, class = "unknown_s3_class")
+  structure(1:3, class = "unknown_s3_class"),
+
+  # Date and POSIXct are doubles, so a value can sit far outside the range
+  # int64_t holds. Converting one is undefined behaviour that a release build
+  # merely saturates, which is exactly what a sanitizer is here to catch: the
+  # boundaries either side, and values past every boundary there is.
+  structure(c(-719528, 2932896), class = "Date"),
+  structure(c(-719529, 2932897), class = "Date"),
+  structure(c(0, 1e300, -1e300, 1e18, .Machine$double.xmax), class = "Date"),
+  .POSIXct(c(-62167219200, 253402300799), tz = "UTC"),
+  .POSIXct(c(-62167219201, 253402300800), tz = "UTC"),
+  .POSIXct(c(0, 1e300, -1e300, 1e18, .Machine$double.xmax), tz = "UTC"),
+
+  # "bytes" has no encoding to convert from, and is refused before the R
+  # internals raise a bare error about it
+  structure(list(a = `Encoding<-`("\xe4\xf6", "bytes")), class = "list")
 )
 for (v in write_vals) {
   check(paste("write", class(v)[1]),
@@ -157,14 +172,51 @@ cat("-- unwind path (errors while the C document is live) --------------\n")
 # The document is owned by an external pointer precisely so that a condition
 # raised mid-conversion cannot leak it. Depth and NUL errors are raised deep in
 # the walk, after the document exists and after some of the result is built.
+ragged <- paste0("[", paste0(sprintf('{"k%d":%d}', 1:4000, 1:4000),
+                            collapse = ","), "]")
+
+# A low budget so the ragged parse *aborts* here rather than succeeding: this
+# loop is about the unwind, and a 4000 x 4000 frame built 200 times would only
+# be slow. base R throughout, so the option is restored by hand.
+old_opts <- options(zujson.max_df_cells = 1000)
+
 for (i in seq_len(200)) {
   quietly(json_parse(paste0(strrep("[", 1200), strrep("]", 1200))))
   quietly(json_parse('{"a":[1,2,"\\u0000"]}'))
   quietly(json_parse('[{"a":1},{"\\u0000":2}]', data_frame = TRUE))
   quietly(json_parse("{bad"))
+  # the frame paths abort with the key table and the cell matrix live: both are
+  # R_alloc'd, so the longjmp has to be what releases them
+  quietly(json_parse('[{"a":1,"a":2}]', data_frame = TRUE))
+  quietly(json_parse(ragged, data_frame = TRUE))
+  quietly(json_parse(paste0(strrep("[", 999), '{"a":1}', strrep("]", 999)),
+                     data_frame = TRUE))
 }
+options(old_opts)
 gc()
-check("unwind path survived 800 aborted parses", TRUE)
+check("unwind path survived 1400 aborted parses", TRUE)
+check("the budget option was restored",
+      zujson_info()$max_df_cells > 1000)
+
+# A malformed option is refused in R, before the cast to R_xlen_t that Inf
+# would make undefined.
+for (bad in list("x", 0, -1, NA_real_, Inf)) {
+  opts <- options(zujson.max_df_cells = bad)
+  check(paste("budget option refused:", format(bad)),
+        quietly(json_parse('[{"a":1}]', data_frame = TRUE)) == "condition")
+  options(opts)
+}
+
+# The same key table and cell matrix on the paths that *succeed*, at a size
+# that makes the hash table resize and the matrix large enough to matter.
+wide <- paste0("[", paste0(rep(paste0("{", paste0(sprintf('"k%d":1', 1:300),
+                                                 collapse = ","), "}"), 300),
+                           collapse = ","), "]")
+check("wide frame", quietly(json_parse(wide, data_frame = TRUE)) == "ok")
+check("ragged frame under the budget",
+      quietly(json_parse(paste0("[", paste0(sprintf('{"k%d":%d}', 1:1000, 1:1000),
+                                            collapse = ","), "]"),
+                         data_frame = TRUE)) == "ok")
 
 cat("-- files ----------------------------------------------------------\n")
 

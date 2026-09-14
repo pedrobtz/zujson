@@ -7,7 +7,9 @@
 zujson_info()
 }
 \value{
-A named list with \code{zujson}, \code{yyjson} and \code{max_depth}.
+A named list with \code{zujson}, \code{yyjson}, \code{max_depth} and
+\code{max_df_cells}. \code{max_depth} is compiled in and fixed; \code{max_df_cells} is
+the limit in force, which \code{options(zujson.max_df_cells = )} changes.
 }
 \description{
 Returns the package version, the version of the vendored yyjson sources it

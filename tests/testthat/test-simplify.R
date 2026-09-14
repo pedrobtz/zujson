@@ -108,6 +108,83 @@ test_that("anything that is not a non-empty array of objects is left alone", {
   expect_false(is.data.frame(json_parse("[[1,2]]", data_frame = TRUE)))
 })
 
+test_that("simplify = \"none\" wins over data_frame", {
+  # "none" is the mode that promises every array arrives as a list, and a data
+  # frame is not one, so the two options are not combined
+  js <- '[{"a":1},{"a":2}]'
+  expect_false(is.data.frame(json_parse(js, simplify = "none", data_frame = TRUE)))
+  expect_identical(json_parse(js, simplify = "none", data_frame = TRUE),
+                   json_parse(js, simplify = "none"))
+  expect_s3_class(json_parse(js, simplify = "preserve", data_frame = TRUE),
+                  "data.frame")
+})
+
+test_that("a missing key is NULL in a list column, as an explicit null is", {
+  # the atomic path collapses absent and null to NA; a list column collapses
+  # them to NULL for the same reason -- one cell cannot say which it was
+  d <- json_parse('[{"a":[1,2]},{"b":3}]', data_frame = TRUE)
+  expect_type(d$a, "list")
+  expect_null(d$a[[2]])
+  expect_identical(d$a[[2]], json_parse('[{"a":[1,2]},{"a":null}]',
+                                        data_frame = TRUE)$a[[2]])
+})
+
+test_that("one object with the same key twice is rejected, not half-kept", {
+  # plain parsing keeps both, so the frame silently keeping one would be data
+  # loss introduced by an option that is meant to change shape, not content
+  expect_error(json_parse('[{"a":1,"a":2}]', data_frame = TRUE),
+               class = "zujson_parse_error")
+  expect_length(json_parse('[{"a":1,"a":2}]')[[1]], 2L)
+
+  # the same key in *different* records is the ordinary case
+  expect_identical(json_parse('[{"a":1},{"a":2}]', data_frame = TRUE)$a, 1:2)
+  # and a duplicate outside the frame is untouched
+  expect_length(json_parse('{"rows":[{"a":1}],"x":1,"x":2}',
+                           data_frame = TRUE), 3L)
+})
+
+test_that("a frame larger than the cell budget is refused", {
+  # records that share no keys ask for one column per record, so a small body
+  # asks for a huge frame: the limit is on rows x columns, not on input size.
+  # The budget is lowered rather than the input raised, so the test costs
+  # nothing -- the refusal happens as the offending column appears.
+  ragged <- function(n) {
+    paste0("[", paste0(sprintf('{"k%d":%d}', seq_len(n), seq_len(n)),
+                       collapse = ","), "]")
+  }
+  withr::local_options(zujson.max_df_cells = 100)
+
+  expect_error(json_parse(ragged(11L), data_frame = TRUE),
+               class = "zujson_limit_error")
+  # exactly at the budget is still built, and is still the right shape
+  expect_identical(dim(json_parse(ragged(10L), data_frame = TRUE)),
+                   c(10L, 10L))
+  # the limit is on the frame, not on the body: the same records parse as a
+  # list, and a wide *shared* key set is only as big as it looks
+  expect_length(json_parse(ragged(11L)), 11L)
+  expect_identical(dim(json_parse('[{"a":1,"b":2},{"a":3,"b":4}]',
+                                  data_frame = TRUE)), c(2L, 2L))
+})
+
+test_that("the cell budget is settable, and a bad setting is an argument error", {
+  expect_type(zujson_info()$max_df_cells, "double")
+
+  withr::local_options(zujson.max_df_cells = 4)
+  # zujson_info() reports the limit in force, which is what the caller asking
+  # "what will happen" wants, and what makes the test above honest
+  expect_identical(zujson_info()$max_df_cells, 4)
+  expect_error(json_parse('[{"a":1,"b":2},{"c":3}]', data_frame = TRUE),
+               class = "zujson_limit_error")
+
+  # Inf is not how the limit is switched off: it would make the cast to
+  # R_xlen_t in C undefined, so it is refused with everything else malformed
+  for (bad in list("x", 0, -1, NA_real_, Inf, c(1, 2), TRUE)) {
+    withr::local_options(zujson.max_df_cells = bad)
+    expect_error(json_parse('[{"a":1}]', data_frame = TRUE),
+                 class = "zujson_arg_error")
+  }
+})
+
 test_that("data frames nest wherever an array of objects appears", {
   x <- json_parse('{"rows":[{"a":1},{"a":2}]}', data_frame = TRUE)
   expect_s3_class(x$rows, "data.frame")

@@ -14,6 +14,22 @@
  * below what the smallest supported stack survives. */
 #define ZUJSON_MAX_DEPTH 1000
 
+/* Maximum cells (records x columns) in a data frame built by data_frame=TRUE.
+ *
+ * The frame is rectangular however ragged the records are, so its size is set
+ * by the *union* of the keys, not by how much JSON arrived: 5000 records that
+ * share no keys is a 5000 x 5000 frame -- 96 MB -- from 72 kB of body. A cap
+ * on the product is the only thing that bounds that, since every other cost
+ * here is already bounded by the length of the input -- and no limit upstream
+ * can stand in for it, because the blow-up is quadratic in the body: a 1 MB
+ * cap still admits ~75k records and so ~5.6e9 cells.
+ *
+ * 5e7 cells is ~400 MB of doubles: clear of any real tabular response (100k
+ * rows x 200 columns is 2e7) and three orders of magnitude below what the
+ * pathological body reaches. This is the default; `zujson.max_df_cells`
+ * overrides it per session, and the R side is what reads that option. */
+#define ZUJSON_MAX_DF_CELLS 50000000
+
 /* ---- structured conditions (zu_cond.c) ---- */
 
 /* Signals an R condition of class

@@ -67,3 +67,13 @@ json_parse(json_write_raw(list(q = "cats")))
 started article](https://pedrobtz.github.io/zujson/articles/zujson.html) carries
 the full type mapping in both directions, the safety limits, and what the
 package deliberately does not do.
+
+## Testing
+
+zujson's tests cover its type mapping, errors and round trips, and run on every
+pull request across five platform and R version combinations. Differential
+tests use `jsonlite` as an external oracle, while JSONTestSuite checks 95/95
+required acceptances and 188/188 required rejections. Sanitizer and fuzzing
+jobs exercise the C boundary and cleanup paths. See
+[Testing and conformance](https://pedrobtz.github.io/zujson/articles/testing.html)
+for the test map, full results and intentional divergences.

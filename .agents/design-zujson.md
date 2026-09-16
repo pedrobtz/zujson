@@ -463,9 +463,11 @@ Conventions inherited from `zukomp`:
 `test-conditions.R` re-runs failing calls fifty times against successful ones,
 which is what would catch the memory model of §8 being wrong.
 
-Deliberately outside the suite, for later: ASan/UBSan and valgrind jobs, and
-fuzzing the parser against a corpus. PROTECT discipline is currently checked
-with `gctorture(TRUE)` over both directions.
+Outside the suite, `native-checks.yaml` runs the native-code jobs: ASan/UBSan,
+valgrind, LTO, gctorture and `rchk`, plus a randomised-input job. PROTECT
+discipline is checked locally with `gctorture(TRUE)` over both directions and
+in CI by `rchk` and the gctorture job. Still for later: fuzzing the parser
+against a corpus rather than against generated input.
 
 ## 13. NDJSON and streaming
 
@@ -577,10 +579,15 @@ Not more of §13.9. In rough order:
   worth doing only once a caller exists, following `zukomp`'s registered
   C-callable pattern rather than exporting yyjson types; **still blocked on
   that caller.**
-- ~~fuzzing and sanitizer CI jobs;~~ **done**: `hardening.yaml` runs
-  `tools/sanitizer-exercise.R` under clang-asan, clang-ubsan and gcc-asan and
-  fuzzes the parser through the R API; `tests/testthat/test-fuzz.R` runs a
-  smaller version on every test run.
+- ~~fuzzing and sanitizer CI jobs;~~ **done**: `native-checks.yaml` runs
+  `tools/sanitizer-exercise.R` under clang-asan and gcc-asan, UBSan over the
+  suite on a runner, and fuzzes the parser through the R API;
+  `tests/testthat/test-fuzz.R` runs a smaller version on every test run.
+- ~~valgrind, LTO, gctorture and `rchk` jobs, and a guard on the vendored
+  tree;~~ **done**, as reusable workflows from `pedrobtz/r-actions`, together
+  with the CRAN-like container legs of `R CMD check` that the runner matrix
+  cannot reach. `rchk` is informational until the package is at zero
+  findings.
 - the streaming object of §13, once `zuhttp` exists to shape its API. **Still
   blocked on the same thing.**
 

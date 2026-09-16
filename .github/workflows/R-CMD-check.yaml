@@ -1,5 +1,30 @@
-# Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
-# Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
+# R CMD check, on the GitHub runners and in the CRAN-like containers, via the
+# reusable workflow in pedrobtz/r-actions. That workflow carries the reasoning;
+# this file carries only what is specific to this package.
+#
+# The container half is the reason for the switch. This package compiles a
+# vendored C parser, and vendored code is written against the compilers
+# upstream tests on -- so the diagnostics it collects are the ones from the
+# compiler nobody in this matrix was running. CRAN's debian-clang leg is
+# clang 23 building C as -std=gnu23, which no GitHub runner is: the macOS
+# runner's clang still defaults to __STDC_VERSION__ 201710L and GCC has a
+# different diagnostic set entirely. Without the containers, the first report
+# of an upstream warning is an incoming pretest, which is a rejected
+# submission rather than a red check.
+#
+# -std=gnu23 also settles the one -pedantic warning noted in CLAUDE.md:
+# `enum : int` in R's own R_ext/Boolean.h is a C23 extension under C17 and
+# ordinary C23.
+#
+# No paths-ignore, unlike native-checks.yaml: --as-cran checks the URLs in
+# README.md, which ships in the tarball, so a prose-only change is a real
+# change here.
+#
+# No inputs at all: the defaults are taken as they ship, including the runners
+# matrix with no R-devel Linux row. That row was in the old hand-rolled matrix
+# and is not missed -- the containers are R-devel on Linux already, on CRAN's
+# own compilers, and pinning R-devel to the runner's own GCC matches no CRAN
+# flavor. Add it back only as insurance against a stale container image.
 on:
   push:
     branches: [main, master, develop]
@@ -11,40 +36,4 @@ permissions: read-all
 
 jobs:
   R-CMD-check:
-    runs-on: ${{ matrix.config.os }}
-
-    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
-
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,   r: 'release'}
-          - {os: ubuntu-latest,   r: 'oldrel-1'}
-
-    env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-      R_KEEP_PKG_SOURCE: yes
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: r-lib/actions/setup-pandoc@v2
-
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ matrix.config.r }}
-          http-user-agent: ${{ matrix.config.http-user-agent }}
-
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::rcmdcheck
-          needs: check
-
-      - uses: r-lib/actions/check-r-package@v2
-        with:
-          upload-snapshots: true
-          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1

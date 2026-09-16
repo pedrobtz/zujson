@@ -400,8 +400,14 @@ static yyjson_mut_val *zu_from_sexp(SEXP x, zu_wctx *ctx, int depth) {
                 "cannot serialize an R object of type '%s'",
                 Rf_type2char((SEXPTYPE) TYPEOF(x)));
 
+    /* Both are attributes of `x`, so both were already safe -- and, as with
+     * the plan's keeper above, safe by an argument no checker can follow. On
+     * the stack they are safe by inspection. Two slots per level against a
+     * depth capped at ZUJSON_MAX_DEPTH is at most 2000, against a protect
+     * stack of 50000. */
+    PROTECT(levels);
     R_xlen_t n = XLENGTH(x);
-    SEXP nms = Rf_getAttrib(x, R_NamesSymbol);
+    SEXP nms = PROTECT(Rf_getAttrib(x, R_NamesSymbol));
 
     /* An empty list with a names attribute is the only empty container that
      * writes as {} -- that is what makes json_parse("{}") round-trip. */
@@ -417,11 +423,16 @@ static yyjson_mut_val *zu_from_sexp(SEXP x, zu_wctx *ctx, int depth) {
                        zu_w_elt(x, kind, levels, i, ctx, depth), ctx);
             zu_tick(ctx);
         }
+        UNPROTECT(2);
         return obj;
     }
 
-    if (ctx->auto_unbox && !as_is && n == 1 && kind != ZU_A_LIST)
-        return zu_w_elt(x, kind, levels, 0, ctx, depth);
+    if (ctx->auto_unbox && !as_is && n == 1 && kind != ZU_A_LIST) {
+        /* After the call, not before: it reads `levels` and can allocate. */
+        yyjson_mut_val *val = zu_w_elt(x, kind, levels, 0, ctx, depth);
+        UNPROTECT(2);
+        return val;
+    }
 
     zu_check_depth(depth);
     yyjson_mut_val *arr = zu_ok(yyjson_mut_arr(ctx->doc));
@@ -429,6 +440,7 @@ static yyjson_mut_val *zu_from_sexp(SEXP x, zu_wctx *ctx, int depth) {
         yyjson_mut_arr_add_val(arr, zu_w_elt(x, kind, levels, i, ctx, depth));
         zu_tick(ctx);
     }
+    UNPROTECT(2);
     return arr;
 }
 

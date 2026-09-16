@@ -48,9 +48,12 @@ public API is
 named modes (`"preserve"` the default, `"coerce"`, `"none"`, with
 `TRUE`/`FALSE` as exact synonyms for the first and last);
 `data_frame = TRUE` turns an array of objects into a data frame wherever
-one appears; sanitizer and fuzzing CI exists (`hardening.yaml`,
-`tools/sanitizer-exercise.R`, `test-fuzz.R`); a number past double range
-parses as `Inf` rather than failing the read.
+one appears; the native-code CI is the reusable workflows in
+`pedrobtz/r-actions` (`native-checks.yaml`, `R-CMD-check.yaml`,
+`coverage.yaml`), which is where sanitizers, valgrind, LTO, gctorture,
+rchk, the vendored-source guard and the CRAN-like container legs now
+live; a number past double range parses as `Inf` rather than failing the
+read.
 
 **One acceptance criterion is open, deliberately.** Design §14.9 names
 `zuhttp`, which is still an empty skeleton in its own repo. The shapes
@@ -83,7 +86,7 @@ Rscript -e 'devtools::test()'
 Rscript -e 'devtools::test(shuffle = TRUE)'           # required before calling anything done
 Rscript -e 'devtools::check(cran = TRUE)'             # target: 0 errors, 0 warnings, 0 notes
 Rscript -e 'devtools::test(filter = "write")'         # tests/testthat/test-write.R
-Rscript tools/sanitizer-exercise.R                    # base R only; what hardening.yaml runs
+Rscript tools/sanitizer-exercise.R                    # base R only; what native-checks.yaml runs
 Rscript tools/jsontestsuite.R                         # nst/JSONTestSuite conformance; needs network once
 ```
 
@@ -361,13 +364,27 @@ silently not built.
   and every block opens with `skip_if_not_installed("jsonlite")`.
 - **CRAN budget: the suite finishes in a few seconds.** Keep it there.
 
-Outside testthat, and now real: `.github/workflows/hardening.yaml` runs
-`tools/sanitizer-exercise.R` under clang-asan, clang-ubsan and gcc-asan
-and fuzzes the parser through the R API. That script uses nothing but
-base R and spends most of its effort on the error paths, where an R
-error longjmps past the explicit free — so **a new C error path belongs
-in it as well as in testthat.** `test-fuzz.R` runs a smaller version of
-the same idea on every test run.
+Outside testthat, `.github/workflows/native-checks.yaml` calls the
+reusable workflows in `pedrobtz/r-actions`: UBSan over the suite on a
+runner, `tools/sanitizer-exercise.R` under clang-asan and gcc-asan,
+valgrind, LTO, gctorture, rchk and the vendored-source guard, plus a
+local job that fuzzes the parser through the R API. That script uses
+nothing but base R and spends most of its effort on the error paths,
+where an R error longjmps past the explicit free — so **a new C error
+path belongs in it as well as in testthat.** `test-fuzz.R` runs a
+smaller version of the same idea on every test run.
+
+**The suite must stay serial, and that is a CI constraint rather than a
+preference.** `Config/testthat/parallel` was removed from DESCRIPTION
+because testthat’s parallel mode runs the test files in `callr`
+subprocesses, and neither
+[`gctorture2()`](https://rdrr.io/r/base/gctorture.html) nor
+`R CMD check --use-valgrind` follows a subprocess: the gctorture job
+would torture a parent that never enters this package’s C at all, and
+valgrind would instrument the same one. Both would go green having
+checked nothing, which is the failure mode those jobs exist to rule out.
+It costs nothing — measured at 4.0s parallel against 3.9s serial, on two
+test processes.
 
 **External conformance is `tools/jsontestsuite.R`**, against a pinned
 commit of `nst/JSONTestSuite`: 95/95 must-accept and 188/188
@@ -386,10 +403,12 @@ only deep files are 500 levels (under the cap, so both accept) and
 100,000 unterminated brackets (so both reject). `test-validate.R` covers
 that one.
 
-Still missing: valgrind, and `rchk` for PROTECT discipline. Until those
-exist, `gctorture(TRUE)` over both directions is the check that a change
-to the C layer has to pass, and it is still required by the definition
-of done below — the sanitizers run in CI, after the fact.
+Valgrind and `rchk` are no longer missing — both run in
+`native-checks.yaml`. `rchk` is informational until the package is at
+zero findings; flip `fail-on-findings: true` then, because after that
+the next finding is a regression. `gctorture(TRUE)` over both directions
+is still required by the definition of done below, because everything in
+that file runs after the fact.
 
 ## Definition of done for any change
 

@@ -5,7 +5,7 @@ articles:
   articles/kubernetes-openapi: kubernetes-openapi.html
   articles/testing: testing.html
   articles/zujson: zujson.html
-last_built: 2026-09-14T08:53Z
+last_built: 2026-09-16T16:26Z
 urls:
   reference: https://pedrobtz.github.io/zujson/reference
   article: https://pedrobtz.github.io/zujson/articles

@@ -51,10 +51,14 @@ work first. The mappings may still change if the design argues for it.
   `zujson_limit_error`, as the offending column appears rather than
   after the allocation.
 
-  The default is 50 million cells, roughly 400 MB of doubles — 100k rows
-  by 200 columns is 20 million, so a real tabular response has room to
-  spare. `options(zujson.max_df_cells = )` changes it for the session,
-  and `zujson_info()$max_df_cells` reports the limit actually in force.
+  The default is 50 million cells, roughly 400 MB of doubles, plus the
+  same order again for the pointer matrix the records are scattered
+  through — 100k rows by 200 columns is 20 million, so a real tabular
+  response has room to spare. `options(zujson.max_df_cells = )` changes
+  it for the session, and `zujson_info()$max_df_cells` reports the limit
+  actually in force. Setting it larger than any frame that could be
+  built switches the check off, at the price that an oversized body then
+  raises R’s own allocation error rather than a `zujson_limit_error`.
 
 - `simplify = "none"` takes precedence over `data_frame = TRUE`, and
   says so. That mode’s promise is that every JSON array arrives as an R

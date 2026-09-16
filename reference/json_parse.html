@@ -132,7 +132,13 @@ on the size of the body can stand in for a limit on that, because the growth
 is quadratic in it. More than <code>zujson_info()$max_df_cells</code> cells raises
 <code>zujson_limit_error</code>. The default is 50 million – clear of any real tabular
 response, and far below what a hostile one reaches – and
-<code>options(zujson.max_df_cells = )</code> changes it for the session.</p>
+<code>options(zujson.max_df_cells = )</code> changes it for the session.
+<code>zujson_info()$max_df_cells</code> reports the limit in force.</p>
+<p>Setting it larger than any frame that could be built switches the check off;
+the option is clamped to what an <code>R_xlen_t</code> holds, which is what
+<code>zujson_info()$max_df_cells</code> then reports. Switched off, nothing bounds the
+allocation but the machine, and a body large enough to exhaust memory raises
+R's own allocation error rather than a <code>zujson_error</code>.</p>
 <p>Nesting deeper than 1000 levels is rejected with a <code>zujson_depth_error</code>,
 which is what makes the parser safe to point at an untrusted response body.</p>
 <p>A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259

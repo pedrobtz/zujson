@@ -236,12 +236,24 @@ silently not built.
   and threaded to C in place of the `data_frame` flag** — `df` is no
   longer a boolean but a cell budget where 0 means off, so the recursion
   carries one value instead of two that must agree. `Inf` is refused in
-  R because the cast to `R_xlen_t` would be undefined. The two costs
-  that are not capped are kept linear instead: the key union goes
-  through the open-addressed index in `zu_collect_keys()`, and the cells
-  are filled by one scattering pass — never by asking each record for
-  each key, which is a scan of that record per cell and was 69s on a
-  4000 x 2000 frame.
+  R, since a number larger than any frame that could be built says the
+  same thing without asking C to convert something no integer type has a
+  value for. Anything finite but enormous **is clamped twice**: in
+  `zu_df_cells()`, against the `max_xlen` field `zujson_build_info()`
+  carries (`R_XLEN_T_MAX` is `int` on a build without long vectors, so R
+  cannot restate it), which is also what makes
+  [`zujson_info()`](https://pedrobtz.github.io/zujson/reference/zujson_info.md)
+  report the limit the parser will enforce rather than the one that was
+  asked for; and again at the cast in `zu_df_arg()`, because an
+  unclamped conversion past that range is undefined rather than merely
+  wrong — it saturates on arm64 but yields `INT64_MIN` on x86-64,
+  leaving data frames on with a negative budget. Neither clamp is
+  redundant, and a test that only asserts the result is finite does not
+  catch either one going. The two costs that are not capped are kept
+  linear instead: the key union goes through the open-addressed index in
+  `zu_collect_keys()`, and the cells are filled by one scattering pass —
+  never by asking each record for each key, which is a scan of that
+  record per cell and was 69s on a 4000 x 2000 frame.
 
 - **`zu_w_str()` is the only place a CHARSXP’s bytes are read**, as
   `zu_mkchar()` is the only place one is made. Both refuse `CE_BYTES`,

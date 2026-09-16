@@ -48,22 +48,30 @@ zu_check_bytes <- function(x, arg) {
 # is the only copy of the number, so R and C cannot drift.
 zu_cache <- new.env(parent = emptyenv())
 
+# The compiled-in constants, read once: they cannot change within a session,
+# and zu_df_cells() runs on every `data_frame = TRUE` parse.
+zu_build_info <- function() {
+  if (is.null(zu_cache$info)) zu_cache$info <- .Call(C_zujson_build_info)
+  zu_cache$info
+}
+
 zu_df_cells <- function() {
   n <- getOption("zujson.max_df_cells")
-  if (is.null(n)) {
-    if (is.null(zu_cache$max_df_cells)) {
-      zu_cache$max_df_cells <- .Call(C_zujson_build_info)$max_df_cells
-    }
-    return(zu_cache$max_df_cells)
-  }
-  # Inf would make the cast to R_xlen_t in C undefined, so it is not a way to
-  # switch the limit off; a number big enough to mean that is.
+  if (is.null(n)) return(zu_build_info()$max_df_cells)
+  # Inf is not how the limit is switched off. A number larger than any frame
+  # that could be built is, and it says the same thing without asking C to
+  # convert something no integer type has a value for.
   if (!is.numeric(n) || length(n) != 1L || is.na(n) || !is.finite(n) || n < 1) {
     zu_abort("zujson_arg_error",
              paste0("`options(zujson.max_df_cells = )` must be a single ",
                     "finite number of 1 or more."))
   }
-  as.double(n)
+  # Clamped to what an R_xlen_t holds, since the cast in C is undefined past
+  # that -- and clamped *here*, so that the number zujson_info() reports is the
+  # number the parser enforces rather than the one that was asked for. The
+  # ceiling comes from the compiled object because R_xlen_t is int on a build
+  # without long vectors, where a literal 2^52 would be wrong.
+  min(as.double(n), zu_build_info()$max_xlen)
 }
 
 zu_check_df <- function(x, arg = "data_frame") {

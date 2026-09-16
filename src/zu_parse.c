@@ -15,9 +15,17 @@
  * already resolved from the `zujson.max_df_cells` option. Carrying the budget
  * in place of the flag keeps one value threaded through the recursion instead
  * of two that must agree, and every "is data_frame on?" test still reads as
- * one. R has checked it is a finite number >= 1, so the cast is defined. */
+ * one. R has checked it is a finite number >= 1 and clamped it to the
+ * R_XLEN_T_MAX that zujson_build_info() reports, so the cast is defined. The
+ * clamp is repeated here because an unclamped conversion of a double past that
+ * range is undefined rather than merely wrong -- it saturates on arm64 but
+ * yields INT64_MIN on x86-64, which would leave data frames enabled with a
+ * negative budget -- and one line at the cast is cheaper than trusting the
+ * boundary. R_XLEN_T_MAX is exactly representable as a double, so the
+ * comparison is exact. */
 static R_xlen_t zu_df_arg(SEXP df_) {
-    return (R_xlen_t) Rf_asReal(df_);
+    double d = Rf_asReal(df_);
+    return d >= (double) R_XLEN_T_MAX ? R_XLEN_T_MAX : (R_xlen_t) d;
 }
 
 /* Array element kinds, ordered so that the numeric family promotes by taking
@@ -435,7 +443,28 @@ typedef struct {
  * of zu_stop(), which a malloc here would leak. */
 static void zu_keyset_init(zu_keyset *ks, R_xlen_t cap, R_xlen_t n_rows,
                            R_xlen_t cells) {
-    size_t n = (size_t) (cap > 0 ? cap : 1), want = 8;
+    /* `cap` is the number of key *occurrences*, which is what the caller can
+     * count without walking the index, but the index never holds more than the
+     * budget allows: zu_collect_keys() asks zu_df_budget() about key n + 1
+     * before interning it, so key number cells / n_rows + 1 is refused rather
+     * than written. Sizing by `cap` instead asks for ~40 bytes per member
+     * against the frame's 8 per cell, and the hash table is the half of that
+     * which is certainly resident, being the one array memset in full: on a
+     * body whose records share their keys -- every real one -- it is 16 bytes
+     * per cell for a table holding one entry per column. A dense 2000 x 2000
+     * frame measured 379 MB peak RSS sized by members against 312 MB sized by
+     * the budget, and the budget bounded none of the difference.
+     *
+     * Taking the smaller of the two cannot under-allocate: n_keys stops at
+     * cells / n_rows, and `slot` stays at least twice that. That factor of two
+     * is what keeps the intern loop in zu_collect_keys() terminating -- the
+     * one probe here that walks until it finds an empty slot, and so the one
+     * that would spin forever on a table with no empty slot left.
+     * zu_key_find() does not need it, since it is only ever asked for a key
+     * already interned and stops on the match. */
+    R_xlen_t bound = n_rows > 0 ? cells / n_rows : cap;
+    size_t n = (size_t) (cap < bound ? cap : bound), want = 8;
+    if (n < 1) n = 1;
     while (want < n * 2) want <<= 1;
 
     ks->keys = (zu_key *)   R_alloc(n, sizeof(zu_key));

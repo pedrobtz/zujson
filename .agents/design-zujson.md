@@ -202,22 +202,59 @@ These were the questions left open in the earlier `jsx3` notes. v1's answers:
      contract break as §7 exists to prevent, and on an overcommitting kernel
      the process may be killed before it gets that far.
 
-     The default is 5e7 cells, ~400 MB of doubles: 100k rows x 200 columns is
-     2e7, so a real response has room, and the pathological one is bounded
-     three orders of magnitude below where it was heading. It is the one limit
+     The default is 5e7 cells, ~400 MB of doubles — and the frame is not the
+     whole peak, since the scattering pass below holds a rows x columns matrix
+     of pointers for the length of the build however sparse the records are,
+     the same order again. 100k rows x 200 columns is 2e7, so a real response
+     has room, and the pathological one is bounded three orders of magnitude
+     below where it was heading. It is the one limit
      here that is settable — `options(zujson.max_df_cells = )` — because unlike
      the depth cap it is a budget rather than a property of the C stack, and
      the right number depends on what the caller can afford. The option is
      resolved and validated in R, then threaded to C in place of the
      `data_frame` flag, so the recursion carries one value rather than two that
-     have to agree; `Inf` is refused, since the cast to `R_xlen_t` would be
-     undefined.
+     have to agree.
+
+     Switching the limit off is spelled as a number larger than any frame that
+     could be built; `Inf` is refused, because that number says the same thing
+     without asking C to convert something no integer type has a value for.
+     Such a number is still past `R_xlen_t` range, where the conversion is
+     undefined rather than merely wrong — it saturates on arm64 but yields
+     `INT64_MIN` on x86-64, which would leave data frames enabled with a
+     negative budget and refuse every frame. It is therefore clamped to
+     `R_XLEN_T_MAX`, in R, where `zujson_info()` can report the clamped value:
+     the limit that function names has to be the limit the parser enforces, or
+     it is no use for sizing a request against. The ceiling comes back from
+     `zujson_build_info()` rather than being restated in R, since `R_xlen_t` is
+     `int` on a build without long vectors. `zu_df_arg()` repeats the clamp at
+     the cast, because one line there is cheaper than trusting the boundary.
+
+     Switched off, nothing bounds the allocation but the machine, and an
+     oversized body reaches R's allocator and its bare `simpleError` — the §7
+     break the limit exists to prevent. That is the trade the caller is making,
+     and `?json_parse` says so.
 
    The two costs that are *not* capped are instead made linear in the length of
    the input: the union of the keys is collected through an open-addressed
    index rather than a scan of the keys so far, and the cells are filled by one
    scattering pass over the records rather than by asking each record for each
    key, which was a scan of that record per cell.
+
+   Linear in the input is not the same as small, though, and the index is sized
+   by the budget as well. Sizing it by the members alone — one slot per key
+   *occurrence*, which is what a record can be asked for without walking it —
+   asks for ~40 bytes per member against the frame's 8 per cell, and the hash
+   table inside it — the one array memset in full, so the one certainly
+   resident rather than merely reserved — is 16 bytes per member. On a body
+   whose records share a key set, which is every real one, that is 16 bytes per
+   *cell* for a table holding one entry per column: a dense 2000 x 2000 frame
+   parsed from a 38 MB file measured 379 MB peak RSS sized by the members
+   against 312 MB sized by the budget. Since
+   `zu_df_budget()` is consulted before a key is interned, no more than
+   `cells / n_rows` keys can ever be held, and taking the smaller of the two
+   bounds cannot under-allocate. It also makes the promise above literal: the
+   refusal now comes before the *large* allocation, not merely before the
+   frame.
 8. **Objects** — always a named list, no exceptions.
 
 ### Valid JSON that R cannot hold

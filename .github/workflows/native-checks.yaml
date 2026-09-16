@@ -1,0 +1,138 @@
+# Native-code checks for the C layer, via the reusable workflows in
+# pedrobtz/r-actions. Replaces hardening.yaml, which hand-rolled the sanitizer
+# container matrix and had no valgrind, LTO, gctorture or rchk leg at all --
+# the first two of which CLAUDE.md listed as the known gaps.
+#
+# The C boundary is where this package should be unusually strict: it vendors a
+# C parser and points it at untrusted response bodies. These jobs are what make
+# the robustness claims testable rather than asserted.
+#
+# paths-ignore skips the whole workflow for prose-only changes. These jobs
+# compile the package and run the suite, so nothing they can observe lives in
+# a .md file, a pkgdown article or .agents/. GitHub applies it only when every
+# changed file matches, so a commit touching both an article and src/ still
+# runs. man/ is deliberately absent: R CMD check executes the examples in it,
+# and valgrind is what runs them under instrumentation. R-CMD-check.yaml is
+# also left alone -- README.md ships in the tarball and --as-cran checks the
+# URLs in it, which is a real check on a prose-only change.
+#
+# YAML anchors would express this once; GitHub Actions does not support them.
+on:
+  push:
+    branches: [main, master, develop]
+    paths-ignore:
+      - '**.md'
+      - 'vignettes/**'
+      - '_pkgdown.yml'
+      - '.agents/**'
+      - 'docs/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'vignettes/**'
+      - '_pkgdown.yml'
+      - '.agents/**'
+      - 'docs/**'
+  schedule:
+    # Weekly, so that a latent problem surfaces without waiting for a push.
+    - cron: "0 4 * * 2"
+  workflow_dispatch:
+
+name: native-checks
+
+permissions: read-all
+
+jobs:
+  # UBSan on an ordinary runner under R-devel, plus the ASan containers.
+  #
+  # The container half is what hardening.yaml did, minus one image. It ran the
+  # exerciser under clang-asan, gcc-asan *and* clang-ubsan; the third is not in
+  # asan-containers here because that job verifies with `nm` that the installed
+  # .so carries __asan symbols, and the clang-ubsan image patches its Makeconf
+  # with -fsanitize=undefined alone. Adding it would fail the instrumentation
+  # check rather than run anything. What replaces it is better anyway: the
+  # `sanitizers` job runs UBSan over the whole suite on a runner, where
+  # test-conditions.R interleaves failing and succeeding calls fifty times.
+  #
+  # asan-dependencies: false because the exerciser uses nothing but base R,
+  # and the r-hub binary repository does not host testthat -- building it and
+  # its dependencies from source under a sanitizer is slow and fragile.
+  sanitizers:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
+    with:
+      asan: true
+      asan-dependencies: false
+      asan-run: Rscript tools/sanitizer-exercise.R
+
+  valgrind:
+    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@v1
+
+  lto:
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@v1
+
+  # step 100 rather than the default 20. Measured here, serially, on the same
+  # machine and one run each: the suite is 3.9s untortured, 86s at step 500 and
+  # 473s at step 100. Step 20 was not measured to completion -- it was still
+  # running when 100 had finished six times over -- and a CI runner is slower
+  # again, so it is not a candidate. Re-measure rather than extrapolate if this
+  # is ever revisited: the curve through three points mostly fits noise.
+  #
+  # Every path still runs and the suite still forces many thousands of
+  # collections; what a larger step gives up is the odds that one lands while a
+  # given unprotected SEXP is live. The rchk job covers the same class
+  # statically on every push.
+  gctorture:
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
+    with:
+      step: 100
+
+  # Informational for now: this package has never been through rchk, and its
+  # PROTECT discipline has only ever been checked by hand and under
+  # gctorture(TRUE). Turn on fail-on-findings once it is at zero, when the
+  # next finding is a regression rather than a backlog.
+  rchk:
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@v1
+
+  # src/vendor/yyjson is yyjson verbatim and is never edited in place. There
+  # is no manifest to verify against yet, so the tree-verification half is
+  # skipped and only the PR guard runs -- but that is the half a verifier
+  # cannot do anyway, because reproducibility is a property of the commit.
+  #
+  # must-update names the two places CLAUDE.md requires to move together with
+  # a refresh: the version in the vendoring script, and the literal the test
+  # suite asserts it against (the test carries a literal because tools/ is not
+  # installed).
+  vendor:
+    uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1
+    with:
+      must-update: |
+        tools/vendor-yyjson.R
+        tests/testthat/test-info.R
+
+  # Package-specific, so it stays a local job. test-fuzz.R runs a small version
+  # of this on every test run; ZUJSON_FUZZ raises the iteration count to what
+  # the ordinary suite cannot afford.
+  fuzz:
+    runs-on: ubuntu-latest
+    name: randomised input
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      ZUJSON_FUZZ: "50000"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat, any::withr, local::.
+          needs: check
+
+      - name: Fuzz the parser
+        run: |
+          Rscript -e 'stopifnot(length(testthat::test_local(
+            filter = "fuzz", reporter = "summary", stop_on_failure = TRUE)) > 0)'

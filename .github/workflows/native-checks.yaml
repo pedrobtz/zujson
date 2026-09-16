@@ -86,12 +86,21 @@ jobs:
     with:
       step: 100
 
-  # Informational for now: this package has never been through rchk, and its
-  # PROTECT discipline has only ever been checked by hand and under
-  # gctorture(TRUE). Turn on fail-on-findings once it is at zero, when the
-  # next finding is a regression rather than a backlog.
+  # Blocking. The first run reported two classes in zu_write.c, both of them
+  # about the data frame plan: a PROTECT in zu_df_plan_init() matched by an
+  # UNPROTECT in each of its two callers, which no per-function analysis can
+  # check, and the names attribute treated as unprotected, which it was not --
+  # rchk cannot see reachability through an attribute. Neither was a live bug.
+  # Both are gone now that the plan's SEXPs are held in a keeper the caller
+  # allocates and protects, so the balance is local and the protection is on
+  # the stack where it can be seen.
+  #
+  # At zero findings the calculation reverses: the next one is a regression,
+  # and an annotation nobody opens is not how you want to hear about it.
   rchk:
     uses: pedrobtz/r-actions/.github/workflows/rchk.yml@v1
+    with:
+      fail-on-findings: true
 
   # src/vendor/yyjson is yyjson verbatim and is never edited in place. There
   # is no manifest to verify against yet, so the tree-verification half is

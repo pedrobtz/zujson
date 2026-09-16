@@ -276,14 +276,27 @@ typedef struct {
     SEXP levels;               /* VECSXP: factor levels per column, or NULL  */
 } zu_df_plan;
 
-/* Returns with plan->levels PROTECTed: the caller owes exactly one
- * UNPROTECT(1) once it is done with the plan. Protecting here rather than in
- * the caller closes the window between allocating the vector and filling it --
- * nothing in that loop allocates today, but a future edit that added an
- * allocation would corrupt the vector silently rather than fail a test. */
-static void zu_df_plan_init(SEXP df, zu_df_plan *plan) {
+/* Everything in the plan that the GC could reclaim lives in one VECSXP that
+ * the caller allocates, PROTECTs and hands in: the names attribute and the
+ * per-column levels. Both are reachable from `df` and so were already safe,
+ * but neither that nor the protection itself could be checked where it was
+ * written. A PROTECT here matched by an UNPROTECT in the caller is a balance
+ * no per-function analysis can verify -- rchk read it as unprotecting more
+ * than was protected in both callers -- and reachability through an attribute
+ * is not something it can see at all.
+ *
+ * The keeper costs one stack slot and makes both local. Each value is stored
+ * into it on the line after it is obtained, with nothing allocating in
+ * between, so the window the old comment worried about is closed at the point
+ * it opens rather than by an argument about what the loop does today. */
+#define ZU_DF_KEEP_NMS    0
+#define ZU_DF_KEEP_LEVELS 1
+#define ZU_DF_KEEP_N      2
+
+static void zu_df_plan_init(SEXP df, zu_df_plan *plan, SEXP keep) {
     R_xlen_t ncol = XLENGTH(df);
     SEXP nms = Rf_getAttrib(df, R_NamesSymbol);
+    SET_VECTOR_ELT(keep, ZU_DF_KEEP_NMS, nms);
     if (!zu_fully_named(nms, ncol))
         zu_stop("zujson_unsupported_type",
                 "data frame columns must all be named");
@@ -295,7 +308,8 @@ static void zu_df_plan_init(SEXP df, zu_df_plan *plan) {
 
     zu_atom *kinds = (zu_atom *) R_alloc((size_t) (ncol > 0 ? ncol : 1),
                                          sizeof(zu_atom));
-    SEXP levels = PROTECT(Rf_allocVector(VECSXP, ncol));   /* caller unprotects */
+    SEXP levels = Rf_allocVector(VECSXP, ncol);
+    SET_VECTOR_ELT(keep, ZU_DF_KEEP_LEVELS, levels);
     plan->levels = levels;
 
     for (R_xlen_t j = 0; j < ncol; j++) {
@@ -346,7 +360,8 @@ static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
     zu_check_depth(depth + 1);
 
     zu_df_plan plan;
-    zu_df_plan_init(df, &plan);            /* leaves plan.levels PROTECTed */
+    SEXP keep = PROTECT(Rf_allocVector(VECSXP, ZU_DF_KEEP_N));
+    zu_df_plan_init(df, &plan, keep);
 
     yyjson_mut_val *arr = zu_ok(yyjson_mut_arr(ctx->doc));
     for (R_xlen_t i = 0; i < plan.nrow; i++) {
@@ -479,17 +494,18 @@ SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
     zu_df_plan plan;
     R_xlen_t n;
 
-    /* Both branches leave exactly one thing protected, so the UNPROTECT(2) at
-     * the end is right either way. */
+    /* Protected in both branches, not just the data frame one, so the count at
+     * the end no longer depends on which was taken -- the PROTECT(R_NilValue)
+     * that used to stand in for the plan on the list branch is gone with it. */
+    SEXP keep = PROTECT(Rf_allocVector(VECSXP, ZU_DF_KEEP_N));
     if (is_df) {
-        zu_df_plan_init(x_, &plan);        /* leaves plan.levels PROTECTed */
+        zu_df_plan_init(x_, &plan, keep);
         n = plan.nrow;
     } else {
         if (TYPEOF(x_) != VECSXP)
             zu_stop("zujson_unsupported_type",
                     "NDJSON needs a list of records or a data frame, not '%s'",
                     Rf_type2char((SEXPTYPE) TYPEOF(x_)));
-        PROTECT(R_NilValue);
         n = XLENGTH(x_);
     }
 
@@ -530,6 +546,6 @@ SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
         if ((i & 0x3FF) == 0) R_CheckUserInterrupt();
     }
 
-    UNPROTECT(2);   /* out, and the plan's levels (or its R_NilValue stand-in) */
+    UNPROTECT(2);   /* out, and the plan's keeper */
     return out;
 }

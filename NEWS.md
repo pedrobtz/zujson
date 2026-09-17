@@ -1,7 +1,6 @@
-# zujson 0.0.0.9000 (development version)
+# zujson 0.1.0
 
-Nothing has been released yet, so everything below is unreleased, newest work
-first. The mappings may still change if the design argues for it.
+First release. Everything below is the work that went into it, newest first.
 
 ## Bug fixes
 

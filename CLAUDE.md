@@ -103,8 +103,9 @@ real result:
 Rscript -e 'devtools::check(env_vars = c("_R_CHECK_SYSTEM_CLOCK_" = "0"), cran = TRUE)'
 ```
 
-PROTECT discipline is checked by hand, since there is no CI job for it
-yet:
+PROTECT discipline now has two CI jobs — `rchk` statically and blocking,
+`gctorture` at step 100 — but both run after the fact, so a C change is
+still checked by hand first:
 
 ``` sh
 Rscript -e 'devtools::load_all(); gctorture(TRUE); <exercise both directions>'
@@ -272,6 +273,23 @@ silently not built.
   `YYJSON_READ_STOP_WHEN_DONE`, which would accept newline-free
   concatenated JSON the content type does not promise.
 
+- **The data frame plan’s SEXPs are held in a keeper the caller
+  allocates and protects**, and `zu_df_plan_init()` stores each into it
+  on the line after it obtains it. Do not go back to protecting inside
+  that function and unprotecting in the caller: the balance is then
+  split across functions, which is what `rchk` reported as unprotecting
+  more than was protected in *both* callers, and it is blocking now. The
+  names attribute goes in the keeper for the same reason — it is
+  reachable from the frame and so was never actually at risk, but
+  reachability through an attribute is not something a static checker
+  can see, and a protection nobody can verify is worth less than the
+  stack slot it saves. It also retired the `PROTECT(R_NilValue)` that
+  used to keep `zujson_write_lines()`’s two branches counting alike.
+  `zu_from_sexp()` protects its own `nms` and `levels` on the stack for
+  the same reason, and all three of its exits owe the matching
+  `UNPROTECT(2)` — the unbox one after the `zu_w_elt()` call, not before
+  it.
+
 - **`zu_df_plan`/`zu_df_row()` are shared by
   [`json_write()`](https://pedrobtz.github.io/zujson/reference/json_write.md)
   and NDJSON** so the two cannot disagree about how a data frame row
@@ -416,11 +434,10 @@ only deep files are 500 levels (under the cap, so both accept) and
 that one.
 
 Valgrind and `rchk` are no longer missing — both run in
-`native-checks.yaml`. `rchk` is informational until the package is at
-zero findings; flip `fail-on-findings: true` then, because after that
-the next finding is a regression. `gctorture(TRUE)` over both directions
-is still required by the definition of done below, because everything in
-that file runs after the fact.
+`native-checks.yaml`, and **`rchk` is blocking**, so a new finding fails
+the build rather than filing an annotation. `gctorture(TRUE)` over both
+directions is still required by the definition of done below, because
+everything in that file runs after the fact.
 
 ## Definition of done for any change
 

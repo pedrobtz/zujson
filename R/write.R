@@ -65,8 +65,10 @@
 #'   [I()] to keep it an array under `auto_unbox = TRUE`; that is the escape
 #'   hatch for an API field that must always be a list.
 #'
-#' @return `json_write()` returns a single string; `json_write_raw()` returns a
-#'   raw vector of UTF-8 bytes.
+#' @return `json_write()` returns a length-1 `character` vector holding the
+#'   JSON text. `json_write_raw()` returns the same document as a `raw` vector
+#'   of UTF-8 bytes, which is what an HTTP request body wants, so that
+#'   direction needs no conversion step.
 #' @seealso [json_parse()] for the other direction.
 #' @export
 #'

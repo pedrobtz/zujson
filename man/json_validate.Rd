@@ -10,7 +10,11 @@ json_validate(x)
 \item{x}{A single string of JSON text, or a raw vector of JSON bytes.}
 }
 \value{
-\code{TRUE} or \code{FALSE}.
+A length-1 \code{logical}, never \code{NA}: \code{TRUE} when \code{x} is well-formed
+JSON by the reader's rules, \code{FALSE} otherwise. \code{NA_character_} is \code{FALSE}
+rather than \code{NA}. A \code{TRUE} is not a promise that \code{\link[=json_parse]{json_parse()}} will
+succeed -- the two cases above are valid JSON that this package cannot
+turn into an R value.
 }
 \description{
 Parses \code{x} and reports whether it succeeded, without building an R result

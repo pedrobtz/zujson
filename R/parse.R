@@ -111,7 +111,15 @@
 #'   by default, in which case it stays a list of named lists. See *Data
 #'   frames* below.
 #'
-#' @return The parsed R object.
+#' @return The R object the JSON maps to, by the table above: a JSON object
+#'   becomes a named `list`, an array an atomic vector when its elements share
+#'   a kind and a `list` when they do not, a string a length-1 `character`, a
+#'   number a length-1 `integer` or `double`, `true`/`false` a length-1
+#'   `logical`, and `null` becomes `NULL`. The class of the result therefore
+#'   depends on the JSON and on both arguments: `simplify` decides the
+#'   mixed-array case, and `data_frame = TRUE` turns an array of objects into a
+#'   `data.frame`. All three functions return the same value for the same JSON
+#'   and differ only in where the bytes come from.
 #' @seealso [json_write()] for the other direction, [json_validate()] to check
 #'   without building a result.
 #' @export
@@ -216,7 +224,11 @@ json_parse_file <- function(path, simplify = TRUE, data_frame = FALSE) {
 #' pre-screening with this.
 #'
 #' @param x A single string of JSON text, or a raw vector of JSON bytes.
-#' @return `TRUE` or `FALSE`.
+#' @return A length-1 `logical`, never `NA`: `TRUE` when `x` is well-formed
+#'   JSON by the reader's rules, `FALSE` otherwise. `NA_character_` is `FALSE`
+#'   rather than `NA`. A `TRUE` is not a promise that [json_parse()] will
+#'   succeed -- the two cases above are valid JSON that this package cannot
+#'   turn into an R value.
 #' @export
 #'
 #' @examples

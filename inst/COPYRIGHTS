@@ -1,0 +1,19 @@
+The zujson R package as a whole is copyright Pedro Baltazar and distributed
+under the MIT licence, as recorded in DESCRIPTION and LICENSE.
+
+Bundled third-party sources
+---------------------------
+
+src/vendor/yyjson/yyjson.c
+src/vendor/yyjson/yyjson.h
+
+  yyjson 0.12.0, https://github.com/ibireme/yyjson
+  Copyright (c) 2020 YaoYuan <ibireme@gmail.com>
+  MIT licence; the full text ships alongside the sources as
+  src/vendor/yyjson/LICENSE.
+
+  The files are vendored verbatim from the upstream release tarball and are
+  never edited in place; tools/vendor-yyjson.R is the script that fetches
+  them. YaoYuan is credited in DESCRIPTION with the roles "ctb" and "cph".
+
+No other third-party code is included.

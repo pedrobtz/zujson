@@ -34,9 +34,10 @@
 #'   record into a data frame; it does not make a frame out of the stream.
 #' @param auto_unbox Passed through to [json_write()] for each record.
 #'
-#' @return `json_parse_ndjson()` returns a list with one element per record.
-#'   `json_write_ndjson()` returns a single string, and
-#'   `json_write_ndjson_raw()` a raw vector of UTF-8 bytes. Both end with a
+#' @return `json_parse_ndjson()` returns a `list` with one element per record,
+#'   each being what [json_parse()] returns for that line. `json_write_ndjson()`
+#'   returns a length-1 `character` vector and `json_write_ndjson_raw()` a `raw`
+#'   vector of UTF-8 bytes; both hold one record per line and end with a
 #'   trailing newline, so appending another record is always valid.
 #' @seealso [json_parse()] and [json_write()] for single documents.
 #' @export

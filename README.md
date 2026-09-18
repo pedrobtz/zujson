@@ -15,7 +15,13 @@ deliberately narrower than `jsonlite`, with a type mapping that is fully documen
 
 ## Installation
 
-Install the development version from GitHub:
+Install the released version from CRAN:
+
+``` r
+install.packages("zujson")
+```
+
+Or the development version from GitHub:
 
 ``` r
 # install.packages("pak")

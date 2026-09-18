@@ -28,7 +28,15 @@ frames} below.}
 \item{path}{Path to a file containing JSON.}
 }
 \value{
-The parsed R object.
+The R object the JSON maps to, by the table above: a JSON object
+becomes a named \code{list}, an array an atomic vector when its elements share
+a kind and a \code{list} when they do not, a string a length-1 \code{character}, a
+number a length-1 \code{integer} or \code{double}, \code{true}/\code{false} a length-1
+\code{logical}, and \code{null} becomes \code{NULL}. The class of the result therefore
+depends on the JSON and on both arguments: \code{simplify} decides the
+mixed-array case, and \code{data_frame = TRUE} turns an array of objects into a
+\code{data.frame}. All three functions return the same value for the same JSON
+and differ only in where the bytes come from.
 }
 \description{
 \code{json_parse()} turns JSON text, or the raw bytes of an HTTP response body,

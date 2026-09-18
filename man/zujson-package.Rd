@@ -4,9 +4,9 @@
 \name{zujson-package}
 \alias{zujson}
 \alias{zujson-package}
-\title{zujson: Portable JSON Parsing and Serialization}
+\title{zujson: Simple JSON Parsing and Serialization}
 \description{
-Converts between JSON text and ordinary R vectors and lists through a small, predictable set of functions, backed by vendored 'yyjson' sources and requiring no system JSON library. Parsing accepts character, raw and file input and reports failures through structured conditions; serialization writes UTF-8 bytes suitable for use directly as an HTTP request body. The type mapping is deliberately narrow and fully documented, so what goes in and what comes out are both predictable.
+Converts between JSON text and ordinary R vectors and lists through a small, predictable set of functions, backed by vendored 'yyjson' \url{https://github.com/ibireme/yyjson} and requiring no system JSON library. Parsing accepts character, raw and file input and reports failures through structured conditions; serialization writes UTF-8 bytes suitable for use directly as an HTTP request body. The type mapping is deliberately narrow and fully documented, so what goes in and what comes out are both predictable.
 }
 \seealso{
 Useful links:
@@ -18,11 +18,11 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com}
+\strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 
 Authors:
 \itemize{
-  \item Pedro Baltazar \email{pedrobtz@gmail.com}
+  \item Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 }
 
 Other contributors:

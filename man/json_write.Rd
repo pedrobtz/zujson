@@ -21,8 +21,10 @@ scalar (\code{TRUE}, the default) or a one-element array. Wrap a value in
 hatch for an API field that must always be a list.}
 }
 \value{
-\code{json_write()} returns a single string; \code{json_write_raw()} returns a
-raw vector of UTF-8 bytes.
+\code{json_write()} returns a length-1 \code{character} vector holding the
+JSON text. \code{json_write_raw()} returns the same document as a \code{raw} vector
+of UTF-8 bytes, which is what an HTTP request body wants, so that
+direction needs no conversion step.
 }
 \description{
 \code{json_write()} renders an R object as JSON text. \code{json_write_raw()} returns

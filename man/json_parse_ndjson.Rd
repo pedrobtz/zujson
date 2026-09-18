@@ -26,9 +26,10 @@ record into a data frame; it does not make a frame out of the stream.}
 \item{auto_unbox}{Passed through to \code{\link[=json_write]{json_write()}} for each record.}
 }
 \value{
-\code{json_parse_ndjson()} returns a list with one element per record.
-\code{json_write_ndjson()} returns a single string, and
-\code{json_write_ndjson_raw()} a raw vector of UTF-8 bytes. Both end with a
+\code{json_parse_ndjson()} returns a \code{list} with one element per record,
+each being what \code{\link[=json_parse]{json_parse()}} returns for that line. \code{json_write_ndjson()}
+returns a length-1 \code{character} vector and \code{json_write_ndjson_raw()} a \code{raw}
+vector of UTF-8 bytes; both hold one record per line and end with a
 trailing newline, so appending another record is always valid.
 }
 \description{

@@ -1,4 +1,4 @@
-# zujson: Simple JSON Parsing and Serialization
+# zujson: Lightweight JSON Parsing and Serialization
 
 Converts between JSON text and ordinary R vectors and lists through a
 small, predictable set of functions, backed by vendored 'yyjson'

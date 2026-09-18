@@ -2,7 +2,7 @@
 
 **Status:** v1 shipped
 **Package:** `zujson`
-**Purpose:** Small, portable JSON parsing and serialization for R, designed for direct reuse by `zuhttp`
+**Purpose:** Lightweight JSON parsing and serialization for R, designed for direct reuse by `zuhttp`
 **Implementation:** C with vendored yyjson
 **Target:** CRAN-compatible source package
 **Non-goals:** A `jsonlite` replacement, JSON Pointer/Patch/Schema, custom serializer dispatch

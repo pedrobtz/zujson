@@ -9,7 +9,14 @@ with a type mapping that is fully documented.
 
 ## Installation
 
-Install the development version from GitHub:
+Install the released version from CRAN:
+
+``` r
+
+install.packages("zujson")
+```
+
+Or the development version from GitHub:
 
 ``` r
 

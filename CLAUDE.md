@@ -17,15 +17,13 @@ the wrong choice.
 
 ## Current state
 
-**Version is `0.0.0.9000`: never released, no tags, not on CRAN.** The
-earlier `0.1.0` was a number in DESCRIPTION, not a release, and NEWS.md
-now says so. Two consequences: there is no released version to stay
-compatible with, so a mapping may still change if the design argues for
-it; and NEWS.md stays a single section until there is a real release, at
-which point its heading and DESCRIPTION `Version` move together. **That
-heading must carry the version number** —
-`# zujson 0.0.0.9000 (development version)`. R CMD check parses NEWS.md
-for `# <pkg> <version>` and reports
+**Version is `0.1.0`, prepared for a first CRAN submission but not yet
+submitted or tagged.** The version and the NEWS.md heading were bumped
+together, as they must be. Until it is actually accepted there is still
+no released version to stay compatible with, so a mapping may still
+change if the design argues for it. **The NEWS heading must carry the
+version number** — `# zujson 0.1.0`. R CMD check parses NEWS.md for
+`# <pkg> <version>` and reports
 `Problems with news in 'NEWS.md': No news entries found` as a NOTE if no
 heading has one, so the bare usethis-style
 `# zujson (development version)` costs a clean check once it is the only
@@ -41,7 +39,7 @@ public API is
 [`json_write_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md),
 [`json_write_ndjson_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md),
 [`zujson_info()`](https://pedrobtz.github.io/zujson/reference/zujson_info.md).
-`devtools::check(cran = TRUE)` is 0/0/0; 1207 tests pass, green under
+`devtools::check(cran = TRUE)` is 0/0/0; 1224 tests pass, green under
 `shuffle = TRUE`, and both directions are clean under `gctorture(TRUE)`.
 
 **Landed since 0.1.0, so do not plan them again:** `simplify` gained
@@ -393,6 +391,13 @@ silently not built.
   fails with the blame in the right place. jsonlite is `Suggests` only
   and every block opens with `skip_if_not_installed("jsonlite")`.
 - **CRAN budget: the suite finishes in a few seconds.** Keep it there.
+
+**Prose is en-GB**, declared as `Language: en-GB` in DESCRIPTION, which
+is what `R CMD check` spell-checks against. `Serialization` in the Title
+is Oxford spelling and consistent with it. Domain terms live in
+`inst/WORDLIST`; regenerate with `spelling::update_wordlist()` rather
+than editing by hand, and do not Americanise prose to silence the
+checker.
 
 Outside testthat, `.github/workflows/native-checks.yaml` calls the
 reusable workflows in `pedrobtz/r-actions`: UBSan over the suite on a

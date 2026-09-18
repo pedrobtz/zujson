@@ -46,10 +46,13 @@ json_write_ndjson_raw(x, auto_unbox = TRUE)
 
 ## Value
 
-`json_parse_ndjson()` returns a list with one element per record.
-`json_write_ndjson()` returns a single string, and
-`json_write_ndjson_raw()` a raw vector of UTF-8 bytes. Both end with a
-trailing newline, so appending another record is always valid.
+`json_parse_ndjson()` returns a `list` with one element per record, each
+being what
+[`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+returns for that line. `json_write_ndjson()` returns a length-1
+`character` vector and `json_write_ndjson_raw()` a `raw` vector of UTF-8
+bytes; both hold one record per line and end with a trailing newline, so
+appending another record is always valid.
 
 ## Details
 

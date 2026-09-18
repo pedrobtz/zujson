@@ -1,12 +1,13 @@
-# zujson: Portable JSON Parsing and Serialization
+# zujson: Simple JSON Parsing and Serialization
 
 Converts between JSON text and ordinary R vectors and lists through a
-small, predictable set of functions, backed by vendored 'yyjson' sources
-and requiring no system JSON library. Parsing accepts character, raw and
-file input and reports failures through structured conditions;
-serialization writes UTF-8 bytes suitable for use directly as an HTTP
-request body. The type mapping is deliberately narrow and fully
-documented, so what goes in and what comes out are both predictable.
+small, predictable set of functions, backed by vendored 'yyjson'
+<https://github.com/ibireme/yyjson> and requiring no system JSON
+library. Parsing accepts character, raw and file input and reports
+failures through structured conditions; serialization writes UTF-8 bytes
+suitable for use directly as an HTTP request body. The type mapping is
+deliberately narrow and fully documented, so what goes in and what comes
+out are both predictable.
 
 ## See also
 
@@ -20,11 +21,11 @@ Useful links:
 
 ## Author
 
-**Maintainer**: Pedro Baltazar <pedrobtz@gmail.com>
+**Maintainer**: Pedro Baltazar <pedrobtz@gmail.com> \[copyright holder\]
 
 Authors:
 
-- Pedro Baltazar <pedrobtz@gmail.com>
+- Pedro Baltazar <pedrobtz@gmail.com> \[copyright holder\]
 
 Other contributors:
 

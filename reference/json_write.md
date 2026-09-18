@@ -33,8 +33,10 @@ json_write_raw(x, pretty = FALSE, auto_unbox = TRUE)
 
 ## Value
 
-`json_write()` returns a single string; `json_write_raw()` returns a raw
-vector of UTF-8 bytes.
+`json_write()` returns a length-1 `character` vector holding the JSON
+text. `json_write_raw()` returns the same document as a `raw` vector of
+UTF-8 bytes, which is what an HTTP request body wants, so that direction
+needs no conversion step.
 
 ## Type mapping
 

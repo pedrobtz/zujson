@@ -21,7 +21,7 @@ force, which `options(zujson.max_df_cells = )` changes.
 ``` r
 zujson_info()
 #> $zujson
-#> [1] "0.0.0.9000"
+#> [1] "0.1.0"
 #> 
 #> $yyjson
 #> [1] "0.12.0"

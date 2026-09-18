@@ -20,7 +20,12 @@ json_validate(x)
 
 ## Value
 
-`TRUE` or `FALSE`.
+A length-1 `logical`, never `NA`: `TRUE` when `x` is well-formed JSON by
+the reader's rules, `FALSE` otherwise. `NA_character_` is `FALSE` rather
+than `NA`. A `TRUE` is not a promise that
+[`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+will succeed – the two cases above are valid JSON that this package
+cannot turn into an R value.
 
 ## Details
 

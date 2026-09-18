@@ -40,7 +40,15 @@ json_parse_file(path, simplify = TRUE, data_frame = FALSE)
 
 ## Value
 
-The parsed R object.
+The R object the JSON maps to, by the table above: a JSON object becomes
+a named `list`, an array an atomic vector when its elements share a kind
+and a `list` when they do not, a string a length-1 `character`, a number
+a length-1 `integer` or `double`, `true`/`false` a length-1 `logical`,
+and `null` becomes `NULL`. The class of the result therefore depends on
+the JSON and on both arguments: `simplify` decides the mixed-array case,
+and `data_frame = TRUE` turns an array of objects into a `data.frame`.
+All three functions return the same value for the same JSON and differ
+only in where the bytes come from.
 
 ## Type mapping
 

@@ -145,3 +145,11 @@ jobs:
         run: |
           Rscript -e 'stopifnot(length(testthat::test_local(
             filter = "fuzz", reporter = "summary", stop_on_failure = TRUE)) > 0)'
+
+  # CRAN's rcnst, rlibro and vnu checks -- the "Additional issues" nothing
+  # above reproduces. Full runs only: `quick`, which skips all three, on
+  # pull requests; full on every other event.
+  cran-special:
+    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@v1
+    with:
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}

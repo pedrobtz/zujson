@@ -10,7 +10,7 @@
 ## Citation
 
 Source:
-[`DESCRIPTION`](https://github.com/pedrobtz/zujson/blob/main/DESCRIPTION)
+[`DESCRIPTION`](https://github.com/pedrobtz/zujson/blob/0.1.0/DESCRIPTION)
 
 Baltazar P (2026). *zujson: Lightweight JSON Parsing and Serialization*.
 R package version 0.1.0, <https://github.com/pedrobtz/zujson>.

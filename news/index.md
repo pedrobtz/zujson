@@ -2,6 +2,8 @@
 
 ## zujson 0.1.0
 
+CRAN release: 2026-10-02
+
 First release. Everything below is the work that went into it, newest
 first.
 

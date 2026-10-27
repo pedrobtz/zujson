@@ -1,6 +1,7 @@
 # zujson
 
 <!-- badges: start -->
+[![CRAN status](https://www.r-pkg.org/badges/version/zujson)](https://CRAN.R-project.org/package=zujson)
 [![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml)
 [![native-checks](https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml)

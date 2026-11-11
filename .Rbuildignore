@@ -14,3 +14,7 @@
 ^cran-comments\.md$
 ^tools$
 ^CRAN-SUBMISSION$
+^\.superpowers$
+^\.worktrees$
+^\.claude$
+^AGENTS\.md$

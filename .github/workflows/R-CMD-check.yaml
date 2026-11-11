@@ -26,8 +26,11 @@
 # own compilers, and pinning R-devel to the runner's own GCC matches no CRAN
 # flavor. Add it back only as insurance against a stale container image.
 on:
-  push:
-    branches: [main, master, develop]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "32 8 * * 0"
+  workflow_dispatch:
   pull_request:
 
 name: R-CMD-check.yaml

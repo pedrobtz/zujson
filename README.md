@@ -5,7 +5,7 @@
 [![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml)
 [![native-checks](https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml)
-[![coverage](https://raw.githubusercontent.com/pedrobtz/zujson/main/.github/badges/coverage.svg)](https://github.com/pedrobtz/zujson/actions/workflows/coverage.yaml)
+[![coverage](https://raw.githubusercontent.com/pedrobtz/zujson/gh-pages/badges/coverage.svg)](https://github.com/pedrobtz/zujson/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
 zujson converts between JSON and ordinary R vectors and lists, using vendored

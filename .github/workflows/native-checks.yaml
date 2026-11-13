@@ -1,32 +1,21 @@
 # Native-code checks for the C layer, via the reusable workflows in
-# pedrobtz/r-actions. Replaces hardening.yaml, which hand-rolled the sanitizer
-# container matrix and had no valgrind, LTO, gctorture or rchk leg at all --
-# the first two of which CLAUDE.md listed as the known gaps.
+# pedrobtz/r-actions, plus two jobs of the package's own (fuzz, jsontestsuite).
 #
 # The C boundary is where this package should be unusually strict: it vendors a
 # C parser and points it at untrusted response bodies. These jobs are what make
 # the robustness claims testable rather than asserted.
 #
-# paths-ignore skips the whole workflow for prose-only changes. These jobs
-# compile the package and run the suite, so nothing they can observe lives in
-# a .md file, a pkgdown article or .agents/. GitHub applies it only when every
-# changed file matches, so a commit touching both an article and src/ still
-# runs. man/ is deliberately absent: R CMD check executes the examples in it,
-# and valgrind is what runs them under instrumentation. R-CMD-check.yaml is
-# also left alone -- README.md ships in the tarball and --as-cran checks the
-# URLs in it, which is a real check on a prose-only change.
-#
-# YAML anchors would express this once; GitHub Actions does not support them.
+# Gating follows .claude/shared/ci.md. The r-actions workflows gate themselves
+# through their own `changes` job; the two local jobs call changes.yml. Every
+# job a pull request can start tests the labels first (`ci:docs`,
+# `ci:minimal`, `skip-ci:<job>`; `full-ci` overrides), so a labelled pull
+# request skips without taking a runner. There is no paths-ignore list: it
+# followed none of the labels and drifted from the gate's rules.
 on:
   # No `push:`: a pull request already checks its merge with main,
   # and the schedule checks main (r-actions README, "Pushes to main").
   pull_request:
-    paths-ignore:
-      - '**.md'
-      - 'vignettes/**'
-      - '_pkgdown.yml'
-      - '.agents/**'
-      - 'docs/**'
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   schedule:
     # Weekly, so that a latent problem surfaces without waiting for a push.
     - cron: "42 8 * * 0"
@@ -36,22 +25,30 @@ name: native-checks
 
 permissions: read-all
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   # UBSan on an ordinary runner under R-devel, plus the ASan containers.
   #
-  # The container half is what hardening.yaml did, minus one image. It ran the
-  # exerciser under clang-asan, gcc-asan *and* clang-ubsan; the third is not in
-  # asan-containers here because that job verifies with `nm` that the installed
-  # .so carries __asan symbols, and the clang-ubsan image patches its Makeconf
-  # with -fsanitize=undefined alone. Adding it would fail the instrumentation
-  # check rather than run anything. What replaces it is better anyway: the
-  # `sanitizers` job runs UBSan over the whole suite on a runner, where
+  # The clang-ubsan image is not in asan-containers: that job verifies with
+  # `nm` that the installed .so carries __asan symbols, and the clang-ubsan
+  # image patches its Makeconf with -fsanitize=undefined alone, so it would
+  # fail the instrumentation check rather than run anything. The `sanitizers`
+  # job runs UBSan over the whole suite on a runner instead, where
   # test-conditions.R interleaves failing and succeeding calls fifty times.
   #
   # asan-dependencies: false because the exerciser uses nothing but base R,
   # and the r-hub binary repository does not host testthat -- building it and
   # its dependencies from source under a sanitizer is slow and fragile.
   sanitizers:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:sanitizers'))
     uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
     with:
       asan: true
@@ -59,9 +56,21 @@ jobs:
       asan-run: Rscript tools/sanitizer-exercise.R
 
   valgrind:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:valgrind'))
     uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@v1
 
   lto:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:lto'))
     uses: pedrobtz/r-actions/.github/workflows/lto.yml@v1
 
   # step 100 rather than the default 20. Measured here, serially, on the same
@@ -76,6 +85,12 @@ jobs:
   # given unprotected SEXP is live. The rchk job covers the same class
   # statically on every push.
   gctorture:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:gctorture'))
     uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
     with:
       step: 100
@@ -92,9 +107,32 @@ jobs:
   # At zero findings the calculation reverses: the next one is a regression,
   # and an annotation nobody opens is not how you want to hear about it.
   rchk:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:rchk'))
     uses: pedrobtz/r-actions/.github/workflows/rchk.yml@v1
     with:
       fail-on-findings: true
+
+  # gcc -fanalyzer over the first-party C. src/vendor is yyjson verbatim and
+  # never edited here, so its findings are reported under their own heading
+  # but not gated on. Reporting only for now, as rchk was at first: the gate
+  # goes on once a first run has been read and the first-party sources are at
+  # zero (#25).
+  analyzers:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:analyzers'))
+    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@v1
+    with:
+      exclude: |
+        src/vendor
 
   # src/vendor/yyjson is yyjson verbatim and is never edited in place. There
   # is no manifest to verify against yet, so the tree-verification half is
@@ -106,16 +144,53 @@ jobs:
   # suite asserts it against (the test carries a literal because tools/ is not
   # installed).
   vendor:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:vendor'))
     uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1
     with:
       must-update: |
         tools/vendor-yyjson.R
         tests/testthat/test-info.R
 
+  # CRAN's rcnst, rlibro and vnu checks -- the "Additional issues" nothing
+  # above reproduces. Full runs only: `quick`, which skips all three, on
+  # pull requests; full on every other event.
+  cran-special:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:cran-special'))
+    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@v1
+    with:
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
+
+  # The gate for the two local jobs below, decided from the changed files and
+  # the labels by r-actions' changes.yml (ci.md, "A package's own workflows").
+  changes:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal'))
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: native-checks
+
   # Package-specific, so it stays a local job. test-fuzz.R runs a small version
   # of this on every test run; ZUJSON_FUZZ raises the iteration count to what
   # the ordinary suite cannot afford.
   fuzz:
+    needs: changes
+    if: >-
+      ${{ !cancelled() && needs.changes.result != 'skipped'
+      && needs.changes.outputs.docs-only != 'true'
+      && !contains(github.event.pull_request.labels.*.name, 'skip-ci:fuzz') }}
     runs-on: ubuntu-latest
     name: randomised input
 
@@ -140,10 +215,34 @@ jobs:
           Rscript -e 'stopifnot(length(testthat::test_local(
             filter = "fuzz", reporter = "summary", stop_on_failure = TRUE)) > 0)'
 
-  # CRAN's rcnst, rlibro and vnu checks -- the "Additional issues" nothing
-  # above reproduces. Full runs only: `quick`, which skips all three, on
-  # pull requests; full on every other event.
-  cran-special:
-    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@v1
-    with:
-      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
+  # nst/JSONTestSuite at the commit pinned in tools/jsontestsuite.R: 95/95
+  # y_ accepted, 188/188 n_ rejected, the i_ split and the parse/validate
+  # divergence held to their recorded baselines. The script exits non-zero on
+  # any miss or baseline move, so a read-flag change or a yyjson bump that
+  # moves a conformance answer fails here rather than going unnoticed (#29).
+  jsontestsuite:
+    needs: changes
+    if: >-
+      ${{ !cancelled() && needs.changes.result != 'skipped'
+      && needs.changes.outputs.docs-only != 'true'
+      && !contains(github.event.pull_request.labels.*.name, 'skip-ci:jsontestsuite') }}
+    runs-on: ubuntu-latest
+    name: JSONTestSuite
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: local::.
+          needs: check
+
+      - name: Run JSONTestSuite against the installed package
+        run: Rscript tools/jsontestsuite.R

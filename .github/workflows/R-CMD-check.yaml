@@ -20,7 +20,10 @@
 # README.md, which ships in the tarball, so a prose-only change is a real
 # change here.
 #
-# No inputs at all: the defaults are taken as they ship, including the runners
+# One input, nosuggests: the NOSUGGESTS flavour CRAN runs, with only hard
+# dependencies installed. It is what verifies the guard in tests/testthat.R
+# (#10); it runs in the full profile only. Otherwise the defaults are taken as
+# they ship, including the runners
 # matrix with no R-devel Linux row. That row was in the old hand-rolled matrix
 # and is not missed -- the containers are R-devel on Linux already, on CRAN's
 # own compilers, and pinning R-devel to the runner's own GCC matches no CRAN
@@ -32,11 +35,20 @@ on:
     - cron: "32 8 * * 0"
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 name: R-CMD-check.yaml
 
 permissions: read-all
 
 jobs:
+  # ci:minimal still runs R CMD check (ci.md, Labels), so it is not tested.
   R-CMD-check:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:R-CMD-check'))
     uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
+    with:
+      nosuggests: true

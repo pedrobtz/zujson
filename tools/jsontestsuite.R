@@ -109,9 +109,11 @@ cat("\n-- test_parsing ---------------------------------------------------\n")
 bad <- report("y_ must be accepted", which(kind == "y"), TRUE) +
        report("n_ must be rejected", which(kind == "n"), FALSE)
 
-# Free choices, so a change here is not a failure -- but it should be a
+# Free choices, so no single answer here is wrong -- but a change should be a
 # deliberate one. Checking the count against a recorded baseline turns "diff 35
-# lines of output by eye" into one line that either agrees or does not.
+# lines of output by eye" into one line that either agrees or does not, and a
+# move fails the run, so CI catches it (#29). A deliberate change updates the
+# baseline in the same commit as the read-flag change that caused it.
 i_baseline <- 12L
 
 i_idx <- which(kind == "i")
@@ -120,6 +122,7 @@ cat(sprintf("%-28s %3d files, %3d accepted, %3d rejected%s\n",
             sum(accepted[i_idx]), sum(!accepted[i_idx]),
             if (sum(accepted[i_idx]) == i_baseline) ""
             else sprintf("   <- CHANGED, baseline is %d accepted", i_baseline)))
+if (sum(accepted[i_idx]) != i_baseline) bad <- bad + 1L
 for (j in i_idx[order(!accepted[i_idx], basename(files[i_idx]))]) {
   cat("    ", if (accepted[j]) "accept" else "reject", "  ",
       basename(files[j]), "\n", sep = "")

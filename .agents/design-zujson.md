@@ -329,11 +329,13 @@ Two rules carry most of the mapping:
 | `factor` | its level, as a string |
 | `Date` | `"YYYY-MM-DD"` |
 | `POSIXct` | `"YYYY-MM-DDTHH:MM:SSZ"`, UTC |
+| `bit64::integer64` | the int64 values, `NA` as `null` |
 | `data.frame` | array of one object per row |
 | `list()` | `[]` |
 | `structure(list(), names=character())` | `{}` |
 | `matrix` | flat array, column-major, `dim` dropped |
 | complex, raw, closure, environment, `POSIXlt` | `zujson_unsupported_type` |
+| a classed vector whose storage the class cannot mean | `zujson_unsupported_type` |
 
 ### Decisions worth recording
 
@@ -376,6 +378,25 @@ of 11 broken-down time fields, so the permissive path would emit
 `{"sec":0,"min":0,...,"gmtoff":0}` — valid JSON, and never what anyone meant by
 sending a timestamp. Falling through to the underlying type is only defensible
 when the underlying type still carries the value; here it does not.
+
+`bit64::integer64` is the other class that fails that test, and it is
+written rather than refused (0.1.1). bit64 keeps each int64 in the bits of a
+double, so falling through wrote `1` as `5e-324`. The class is recognised by
+name, which keeps bit64 out of the dependencies, and the bits are written as
+the integer they are, with bit64's `NA` (`INT64_MIN`) as `null`. It matters to
+an HTTP client because 64-bit identifiers read with bit64 are exactly what gets
+sent back in a request body.
+
+**The class decides the kind only when the storage agrees** (0.1.1). A `Date`
+or `POSIXct` must be stored as a number, a factor's levels must be character,
+and a data frame must be a list of vector columns. A mismatch raises
+`zujson_unsupported_type`; before, it reached R's checked accessors and raised a
+bare error outside the §7 contract. The one mismatch that is written is an
+all-`NA` logical `Date` or `POSIXct`, because `structure(NA, class = "Date")` is
+how R spells a missing date: it becomes `null`. The `POSIXlt` refusal is applied
+at every entry point -- the dispatcher, each data frame column and the NDJSON
+top level -- since a check at one of them alone let the other two write the 11
+fields as data.
 
 A matrix does fall through, to its values in column-major order with `dim`
 dropped. That is out of scope per §5 question 5 rather than an oversight, and

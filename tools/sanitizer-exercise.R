@@ -167,6 +167,36 @@ for (v in write_vals) {
         quietly(json_write(v, pretty = TRUE)) %in% c("ok", "condition"))
 }
 
+# Refusals raised mid-write, while the mutable document is live and part of
+# the output is built: a POSIXlt column and NDJSON record (#40), classed
+# vectors whose storage the class does not match, and malformed frames (#43).
+# Each must be a condition, never a bare error, with no leak behind it.
+lt <- as.POSIXlt(as.POSIXct("2024-01-01", tz = "UTC") + 1:3, tz = "UTC")
+lt_df <- data.frame(id = 1:3)
+lt_df$t <- lt
+refused <- list(
+  lt_df,
+  structure("x", class = "Date"),
+  structure(TRUE, class = c("POSIXct", "POSIXt")),
+  structure(1:2, levels = 1:2, class = "factor"),
+  structure(1L, class = "integer64"),
+  structure(list(a = NULL), class = "data.frame"),
+  structure(1:3, names = c("a", "b", "c"), class = "data.frame"),
+  list(ok = 1:500, bad = structure("x", class = "Date"))
+)
+for (v in refused) {
+  check(paste("refuse", class(v)[1]), quietly(json_write(v)) == "condition")
+  check(
+    paste("refuse NDJSON", class(v)[1]),
+    quietly(json_write_ndjson(list(1L, v))) == "condition"
+  )
+}
+check("refuse NDJSON POSIXlt", quietly(json_write_ndjson(lt)) == "condition")
+check(
+  "refuse NDJSON POSIXlt frame",
+  quietly(json_write_ndjson(lt_df)) == "condition"
+)
+
 cat("-- unwind path (errors while the C document is live) --------------\n")
 
 # The document is owned by an external pointer precisely so that a condition

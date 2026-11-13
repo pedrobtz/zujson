@@ -44,6 +44,7 @@ the same JSON as UTF-8 bytes, which is the form an HTTP request body wants.
    \code{factor} \tab its level, as a string \cr
    \code{Date} \tab \code{"YYYY-MM-DD"} \cr
    \code{POSIXct} \tab \code{"YYYY-MM-DDTHH:MM:SSZ"}, in UTC \cr
+   \code{bit64::integer64} \tab the integers it holds \cr
    \code{data.frame} \tab array of one object per row \cr
    \code{list()} \tab \verb{[]} \cr
    \code{structure(list(), names = character())} \tab \code{{}} \cr
@@ -65,7 +66,14 @@ what its \code{tzone} says, since it is the same instant either way, and
 sub-second parts are dropped. Both are doubles in R and so reach much
 further than a timestamp can be written: outside \code{0000-01-01} to
 \code{9999-12-31}, the four-digit years ISO 8601 allows, they raise a
-\code{zujson_write_error} rather than print a year no API can parse.
+\code{zujson_write_error} rather than print a year no API can parse. A \code{Date} or
+\code{POSIXct} that is all \code{NA} but stored as logical, which is how
+\code{structure(NA, class = "Date")} comes out, is written as \code{null}; one stored
+as anything else that is not a number raises \code{zujson_unsupported_type}.
+
+An \code{integer64} from bit64 is written as the 64-bit integers it holds, with
+its \code{NA} as \code{null}. Its values live in the bits of a double, so writing the
+double would send \code{1} as \code{5e-324}. bit64 itself is not needed to write one.
 
 A string whose \code{Encoding()} is \code{"bytes"} also raises a \code{zujson_write_error}.
 That marking is R saying it does not know the encoding, and JSON text is
@@ -79,8 +87,11 @@ so \code{1} is a double, and \code{1.0} is rejected by a schema expecting an int
 
 Complex vectors, raw vectors, functions, environments and \code{POSIXlt} have no
 sensible JSON form and raise a \code{zujson_unsupported_type} error rather than
-being guessed at. (\code{POSIXlt} is a list of 11 broken-down time fields; convert
-it with \code{as.POSIXct()} first.) A vector carrying an unrecognised class is
+being guessed at, wherever they appear: as a value, a list element, a data
+frame column or an NDJSON record. (\code{POSIXlt} is a list of 11 broken-down
+time fields; convert it with \code{as.POSIXct()} first.) So does a classed
+vector whose storage the class cannot mean, such as a factor whose levels
+are not character. A vector carrying an unrecognised class is
 written as its underlying type, which for a matrix means its values in
 column-major order with \code{dim} dropped — matrices are not turned into nested
 arrays in this version.

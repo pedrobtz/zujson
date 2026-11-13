@@ -163,9 +163,15 @@ static yyjson_mut_val *zu_w_date(zu_wctx *ctx, double days) {
  * Sub-second parts are dropped; RFC 3339 to the second is what HTTP APIs use. */
 static yyjson_mut_val *zu_w_time(zu_wctx *ctx, double secs) {
     if (!R_FINITE(secs)) return zu_ok(yyjson_mut_null(ctx->doc));
-    double fdays = floor(secs / 86400.0);
+    /* Floor to whole seconds *before* splitting off the days. Splitting the
+     * raw value first lets `secs - fdays * 86400` round to exactly 86400 for
+     * an instant a hair below midnight, which printed hour 24 (#41). Once
+     * `whole` is an integer every step below is exact: it is under 2^53 in
+     * magnitude for any day that passes the range check. */
+    double whole = floor(secs);
+    double fdays = floor(whole / 86400.0);
     zu_check_day(fdays, "POSIXct");
-    int rem = (int) (secs - fdays * 86400.0);
+    int rem = (int) (whole - fdays * 86400.0);
     int y, m, d;
     zu_civil((int64_t) fdays, &y, &m, &d);
     char buf[48];
@@ -178,22 +184,81 @@ static yyjson_mut_val *zu_w_time(zu_wctx *ctx, double secs) {
 
 typedef enum {
     ZU_A_LGL, ZU_A_INT, ZU_A_DBL, ZU_A_STR,
-    ZU_A_FACTOR, ZU_A_DATE, ZU_A_TIME,
+    ZU_A_FACTOR, ZU_A_DATE, ZU_A_TIME, ZU_A_I64,
     ZU_A_LIST, ZU_A_NONE
 } zu_atom;
 
+/* POSIXlt is a list of 11 broken-down time fields, so without this it would
+ * serialize as {"sec":...,"min":...,"gmtoff":...} -- valid JSON, and never
+ * what anyone meant by sending a timestamp. It is called from every place a
+ * value enters the writer: the dispatcher, each data frame column, and the
+ * NDJSON top level. A POSIXlt reaching a data frame column or NDJSON without
+ * passing through here was written field by field (#40). */
+static void zu_refuse_posixlt(SEXP x) {
+    if (Rf_inherits(x, "POSIXlt"))
+        zu_stop("zujson_unsupported_type",
+                "cannot serialize a POSIXlt; convert it with as.POSIXct() first");
+}
+
+static int zu_all_na_lgl(SEXP x) {
+    R_xlen_t n = XLENGTH(x);
+    const int *p = LOGICAL_RO(x);
+    for (R_xlen_t i = 0; i < n; i++)
+        if (p[i] != NA_LOGICAL) return 0;
+    return 1;
+}
+
+/* A Date or POSIXct is a number of days or seconds, so only numeric storage
+ * carries one. An all-NA logical is how R spells a missing date
+ * (`structure(NA, class = "Date")`), and it is written as the nulls it holds.
+ * Anything else reached REAL() unchecked and raised a bare error (#43). */
+static zu_atom zu_time_kind(SEXP x, zu_atom kind, const char *what) {
+    switch (TYPEOF(x)) {
+    case REALSXP:
+    case INTSXP:
+        return kind;
+    case LGLSXP:
+        if (zu_all_na_lgl(x)) return ZU_A_LGL;
+        /* fall through */
+    default:
+        zu_stop("zujson_unsupported_type",
+                "cannot serialize a %s stored as '%s'; only a numeric %s "
+                "carries a value", what, Rf_type2char((SEXPTYPE) TYPEOF(x)),
+                what);
+        return ZU_A_NONE;                /* not reached */
+    }
+}
+
 /* Classed vectors are recognised by class first, so a Date is a date rather
- * than the number of days it is stored as. An unrecognised class falls through
- * to the underlying type, which is permissive by design: a new class should
- * not be a hard failure. */
+ * than the number of days it is stored as. The class decides the kind only
+ * when the storage type agrees with it; a mismatch is refused rather than
+ * handed to an accessor that would raise a bare error (#43). An unrecognised
+ * class falls through to the underlying type, which is permissive by design:
+ * a new class should not be a hard failure. */
 static zu_atom zu_atom_kind(SEXP x, SEXP *levels) {
     *levels = R_NilValue;
     if (Rf_isFactor(x)) {
-        *levels = Rf_getAttrib(x, R_LevelsSymbol);
+        SEXP lv = Rf_getAttrib(x, R_LevelsSymbol);
+        if (lv != R_NilValue && TYPEOF(lv) != STRSXP)
+            zu_stop("zujson_unsupported_type",
+                    "cannot serialize a factor whose levels are '%s', not "
+                    "character", Rf_type2char((SEXPTYPE) TYPEOF(lv)));
+        *levels = lv;
         return ZU_A_FACTOR;
     }
-    if (Rf_inherits(x, "Date"))    return ZU_A_DATE;
-    if (Rf_inherits(x, "POSIXct")) return ZU_A_TIME;
+    /* bit64 keeps each int64 in the bits of a double. Falling through to the
+     * double wrote those bits as denormals -- 1 as 5e-324 -- which is the case
+     * §6 calls indefensible: the underlying type does not carry the value
+     * (#48). Recognised by class name alone, so bit64 is not a dependency. */
+    if (Rf_inherits(x, "integer64")) {
+        if (TYPEOF(x) != REALSXP)
+            zu_stop("zujson_unsupported_type",
+                    "cannot serialize an integer64 stored as '%s'",
+                    Rf_type2char((SEXPTYPE) TYPEOF(x)));
+        return ZU_A_I64;
+    }
+    if (Rf_inherits(x, "Date"))    return zu_time_kind(x, ZU_A_DATE, "Date");
+    if (Rf_inherits(x, "POSIXct")) return zu_time_kind(x, ZU_A_TIME, "POSIXct");
     switch (TYPEOF(x)) {
     case LGLSXP:  return ZU_A_LGL;
     case INTSXP:  return ZU_A_INT;
@@ -228,6 +293,12 @@ static yyjson_mut_val *zu_w_elt(SEXP x, zu_atom kind, SEXP levels,
     }
     case ZU_A_DATE: return zu_w_date(ctx, zu_num_elt(x, i));
     case ZU_A_TIME: return zu_w_time(ctx, zu_num_elt(x, i));
+    case ZU_A_I64: {
+        int64_t v;
+        memcpy(&v, &REAL(x)[i], sizeof v);   /* the bits, not the double */
+        if (v == INT64_MIN) return zu_ok(yyjson_mut_null(ctx->doc));
+        return zu_ok(yyjson_mut_sint(ctx->doc, v));
+    }
     case ZU_A_LIST: return zu_from_sexp(VECTOR_ELT(x, i), ctx, depth + 1);
     default:
         zu_stop("zujson_unsupported_type",
@@ -294,6 +365,12 @@ typedef struct {
 #define ZU_DF_KEEP_N      2
 
 static void zu_df_plan_init(SEXP df, zu_df_plan *plan, SEXP keep) {
+    /* The class says data frame; the structure has to agree before anything
+     * reads it, or XLENGTH()/VECTOR_ELT() raise bare errors (#43). */
+    if (TYPEOF(df) != VECSXP)
+        zu_stop("zujson_unsupported_type",
+                "cannot serialize a data frame stored as '%s', not a list of "
+                "columns", Rf_type2char((SEXPTYPE) TYPEOF(df)));
     R_xlen_t ncol = XLENGTH(df);
     SEXP nms = Rf_getAttrib(df, R_NamesSymbol);
     SET_VECTOR_ELT(keep, ZU_DF_KEEP_NMS, nms);
@@ -301,10 +378,21 @@ static void zu_df_plan_init(SEXP df, zu_df_plan *plan, SEXP keep) {
         zu_stop("zujson_unsupported_type",
                 "data frame columns must all be named");
 
+    for (R_xlen_t j = 0; j < ncol; j++) {
+        SEXP col = VECTOR_ELT(df, j);
+        if (!Rf_isVector(col))
+            zu_stop("zujson_unsupported_type",
+                    "column '%s' is a '%s', not a vector",
+                    zu_char_msg(STRING_ELT(nms, j)),
+                    Rf_type2char((SEXPTYPE) TYPEOF(col)));
+    }
+
     /* With no columns there is no column to measure, but the rows still exist:
-     * df[, 0] is n rows of nothing, which is n empty objects. */
+     * df[, 0] is n rows of nothing, which is n empty objects. A hand-built
+     * frame with no row.names at all has none. */
+    SEXP rn = Rf_getAttrib(df, R_RowNamesSymbol);
     R_xlen_t nrow = ncol > 0 ? XLENGTH(VECTOR_ELT(df, 0))
-                             : XLENGTH(Rf_getAttrib(df, R_RowNamesSymbol));
+                             : (rn == R_NilValue ? 0 : XLENGTH(rn));
 
     zu_atom *kinds = (zu_atom *) R_alloc((size_t) (ncol > 0 ? ncol : 1),
                                          sizeof(zu_atom));
@@ -314,6 +402,7 @@ static void zu_df_plan_init(SEXP df, zu_df_plan *plan, SEXP keep) {
 
     for (R_xlen_t j = 0; j < ncol; j++) {
         SEXP col = VECTOR_ELT(df, j);
+        zu_refuse_posixlt(col);
         if (Rf_inherits(col, "data.frame"))
             zu_stop("zujson_unsupported_type",
                     "column '%s' is itself a data frame, which is not supported",
@@ -353,15 +442,17 @@ static yyjson_mut_val *zu_df_row(SEXP df, const zu_df_plan *plan, R_xlen_t i,
 
 /* Row oriented, because that is what an HTTP API means by a table. */
 static yyjson_mut_val *zu_w_df(SEXP df, zu_wctx *ctx, int depth) {
-    /* A data frame is the one value that emits *two* container levels at once:
-     * the array of rows at `depth`, and each row object at `depth + 1`. Both
-     * have to be charged, or json_write() can emit JSON that json_parse()
-     * then rejects as too deep. */
-    zu_check_depth(depth + 1);
-
     zu_df_plan plan;
     SEXP keep = PROTECT(Rf_allocVector(VECSXP, ZU_DF_KEEP_N));
     zu_df_plan_init(df, &plan, keep);
+
+    /* A data frame is the one value that emits *two* container levels at once:
+     * the array of rows at `depth`, and each row object at `depth + 1`. Both
+     * have to be charged, or json_write() can emit JSON that json_parse()
+     * then rejects as too deep. A frame with no rows emits only the array, so
+     * it is charged only that one: charging it two refused `[]` at a depth
+     * json_parse() reads (#57). */
+    zu_check_depth(plan.nrow > 0 ? depth + 1 : depth);
 
     yyjson_mut_val *arr = zu_ok(yyjson_mut_arr(ctx->doc));
     for (R_xlen_t i = 0; i < plan.nrow; i++) {
@@ -384,12 +475,7 @@ static yyjson_mut_val *zu_from_sexp(SEXP x, zu_wctx *ctx, int depth) {
      * before the class dispatch because I() prepends to the class vector. */
     int as_is = Rf_inherits(x, "AsIs");
 
-    /* POSIXlt is a list of 11 broken-down time fields, so without this it
-     * would serialize as {"sec":...,"min":...,"gmtoff":...} -- valid JSON, and
-     * never what anyone meant by sending a timestamp. */
-    if (Rf_inherits(x, "POSIXlt"))
-        zu_stop("zujson_unsupported_type",
-                "cannot serialize a POSIXlt; convert it with as.POSIXct() first");
+    zu_refuse_posixlt(x);
 
     if (Rf_inherits(x, "data.frame")) return zu_w_df(x, ctx, depth);
 
@@ -452,7 +538,9 @@ SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
     int as_raw = Rf_asLogical(as_raw_);
 
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
-    if (!doc) Rf_error("out of memory allocating a JSON document");
+    if (!doc)
+        zu_stop("zujson_write_error",
+                "out of memory allocating a JSON document");
     SEXP owner = PROTECT(zu_extptr_own_mut_doc(doc));
 
     zu_wctx ctx = { doc, Rf_asLogical(auto_unbox_), 0 };
@@ -503,6 +591,9 @@ SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
 SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
     zu_err_line = 0;
     int auto_unbox = Rf_asLogical(auto_unbox_);
+    /* A POSIXlt is a list, so without this each of its 11 fields became a
+     * record (#40). */
+    zu_refuse_posixlt(x_);
     int is_df = Rf_inherits(x_, "data.frame");
 
     zu_df_plan plan;
@@ -527,7 +618,9 @@ SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
 
     for (R_xlen_t i = 0; i < n; i++) {
         yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
-        if (!doc) Rf_error("out of memory allocating a JSON document");
+        if (!doc)
+        zu_stop("zujson_write_error",
+                "out of memory allocating a JSON document");
         SEXP owner = PROTECT(zu_extptr_own_mut_doc(doc));
 
         zu_wctx ctx = { doc, auto_unbox, 0 };

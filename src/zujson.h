@@ -43,6 +43,17 @@
  * zu_owner_*). */
 void zu_stop(const char *cls, const char *fmt, ...);
 
+/* The NDJSON line a record is being built from, or 0. While it is set,
+ * zu_stop() prefixes "line N: " to its message, so an error raised deep in the
+ * tree builder names the line the way a reader error does. zu_stop() clears
+ * it; every .Call entry point that can raise clears it too, so a longjmp that
+ * did not pass through zu_stop() cannot leave it behind for the next call. */
+extern unsigned long zu_err_line;
+
+/* The longest prefix of `s` (of `len` bytes) no longer than `max` bytes that
+ * does not end inside a UTF-8 sequence: for quoting a key into a message. */
+size_t zu_utf8_cut(const char *s, size_t len, size_t max);
+
 /* ---- external pointers owning C memory across a longjmp (zu_cond.c) ---- */
 
 /* Each returns an empty EXTPTRSXP, for the caller to protect, with a finalizer

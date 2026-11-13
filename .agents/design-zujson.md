@@ -137,10 +137,15 @@ body makes the body unparseable — the wrong failure mode for the use case this
 package exists to serve, and a divergence from `jsonlite`, which returns `Inf`.
 
 `ZUJSON_READ_FLAGS` therefore carries `YYJSON_READ_BIGNUM_AS_RAW`: the token
-arrives as `YYJSON_TYPE_RAW` and `zu_raw_dbl()` converts it with `R_strtod()`,
-giving exactly what `as.numeric()` gives the same text — `Inf` here, and the
-nearest double for an integer wider than int64. From there it is an ordinary
-double and the lattice treats it like any other.
+arrives as `YYJSON_TYPE_RAW` and `zu_raw_dbl()` converts it. A finite token, an
+integer wider than uint64, is read again by yyjson's own correctly rounded
+number reader, giving the nearest double: the same one the token spelled with
+`.0` gives. Only a token past the range of a double goes to `R_strtod()`, for
+its `Inf`. (Before 0.1.1 every RAW token went to `R_strtod()`, on the promise
+that it gave "exactly what `as.numeric()` gives". It does, but `as.numeric()`
+is not correctly rounded: about 1 in 1000 integers past uint64 came back 1 ulp
+off, and the two spellings of one number disagreed.) From there it is an
+ordinary double and the lattice treats it like any other.
 
 Two things this is deliberately *not*:
 
@@ -194,6 +199,14 @@ These were the questions left open in the earlier `jsx3` notes. v1's answers:
      this runs on untrusted bodies, `ZUJSON_MAX_DF_CELLS` caps rows x columns
      and `zujson_limit_error` is raised as the offending column appears, before
      the allocation rather than after it.
+
+     The cap is on the **document**, not on each frame (0.1.1). Every frame,
+     nested or side by side, draws on one budget, charged as soon as its
+     columns are known, and an NDJSON body is one document. Capping each frame
+     separately let a body hold any number of frames just under the cap: 40
+     frames of 2,000 records in 836 KB built 1.6e8 cells under a 5e7 cap, which
+     is the growth this limit exists to bound, made linear in the frame count
+     instead of quadratic in the records.
 
      A body-size limit upstream cannot stand in for this one. The growth is
      quadratic in the body, so a 1 MB cap — generous for an API — still admits

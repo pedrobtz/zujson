@@ -63,8 +63,8 @@ when every element agrees on a type and a list otherwise:\tabular{ll}{
 Numbers become \code{integer} when they fit in R's 32-bit integer and \code{double}
 otherwise. A number too large for any finite \code{double} becomes \code{Inf} rather
 than an error: RFC 8259 sets no limit on the magnitude of a number, so
-\code{1e309} is valid JSON, and the value is the one \code{as.numeric()} gives the
-same token. A \code{null} inside an array being simplified becomes \code{NA}; a \code{null}
+\code{1e309} is valid JSON. An integer too wide for 64 bits becomes the nearest
+\code{double}, the same one the token spelled with \code{.0} gives. A \code{null} inside an array being simplified becomes \code{NA}; a \code{null}
 anywhere else becomes \code{NULL}. Strings arrive as UTF-8.
 }
 
@@ -110,10 +110,13 @@ union of the keys rather than by the length of the body: records that share
 no keys at all would ask for one cell per record \emph{per record}, and no limit
 on the size of the body can stand in for a limit on that, because the growth
 is quadratic in it. More than \code{zujson_info()$max_df_cells} cells raises
-\code{zujson_limit_error}. The default is 50 million -- clear of any real tabular
+\code{zujson_limit_error}. The limit is for the whole document, not for each frame:
+every data frame in it, nested or side by side, draws on one budget, and
+\code{json_parse_ndjson()} counts one body as one document. The default is 50 million -- clear of any real tabular
 response, and far below what a hostile one reaches -- and
 \code{options(zujson.max_df_cells = )} changes it for the session.
-\code{zujson_info()$max_df_cells} reports the limit in force.
+\code{zujson_info()$max_df_cells} reports the limit in force, as a whole number
+of cells.
 
 Setting it larger than any frame that could be built switches the check off;
 the option is clamped to what an \code{R_xlen_t} holds, which is what

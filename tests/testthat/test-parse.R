@@ -76,12 +76,12 @@ test_that("a number too large for a double becomes Inf, not an error", {
   expect_identical(json_parse("[1e308]"), 0x1.1ccf385ebc8ap+1023)
   expect_identical(json_parse("[1e-400]"), 0)          # underflow, not overflow
 
-  # An integer wider than int64 keeps going through the same path, and there
-  # as.numeric() is the expectation on purpose: that path is zu_raw_dbl(),
-  # which is R_strtod, so the value tracks R's reader even where R's reader is
-  # the less accurate of the two.
+  # An integer wider than int64 is the nearest double: the correctly rounded
+  # value, written in hex so no decimal reader is in the oracle. This used to
+  # assert as.numeric(), which is not correctly rounded -- on arm64, where long
+  # double is double, it is many ulps off for this very token (#46).
   expect_identical(json_parse("[123456789012345678901234567890]"),
-                   as.numeric("123456789012345678901234567890"))
+                   0x1.8ee90ff6c373ep+96)
 
   # and it is an ordinary double once there, so it simplifies with the rest
   expect_identical(json_parse("[1e309, 2]"), c(Inf, 2))
@@ -252,4 +252,83 @@ test_that("json_parse_file expands a tilde path", {
   withr::defer(unlink(path))
   writeLines('{"a": 1}', path)
   expect_identical(json_parse_file(file.path("~", name)), list(a = 1L))
+})
+
+test_that("an integer wider than uint64 parses to the nearest double", {
+  # It went through R_strtod, which is not correctly rounded: 1 in about
+  # 1000 such integers came back 1 ulp off, and differed from the same digits
+  # spelled with ".0" (#46). The ".0" spelling is read by yyjson's correctly
+  # rounded reader, so it is the oracle.
+  d <- "7908650058519908757503158852011"
+  expect_identical(json_parse(d), json_parse(paste0(d, ".0")))
+  expect_identical(sprintf("%a", json_parse(d)), "0x1.8f48e7ffdefabp+102")
+  withr::local_seed(46)
+  digits <- vapply(sample(20:120, 300, TRUE), function(n) {
+    paste0(sample(1:9, 1), paste(sample(0:9, n - 1, TRUE), collapse = ""))
+  }, "")
+  # all 300 through the atomic-array fill, and 20 of them as scalars
+  expect_identical(
+    json_parse(paste0("[", paste(digits, collapse = ","), "]")),
+    json_parse(paste0("[", paste0(digits, ".0", collapse = ","), "]"))
+  )
+  for (d in digits[1:20]) {
+    expect_identical(json_parse(d), json_parse(paste0(d, ".0")), info = d)
+  }
+})
+
+test_that("the double range is straddled at DBL_MAX and the subnormal end", {
+  # Two components decide this limit: yyjson chooses the RAW path and the
+  # converter reads it. The window between 1e308 and 1e309 is where they
+  # could disagree (#35).
+  xmax <- .Machine$double.xmax
+  expect_identical(json_parse("1.7976931348623157e308"), xmax)
+  expect_identical(json_parse("1.797693134862315807e308"), xmax)
+  expect_identical(json_parse("1.797693134862315808e308"), Inf)
+  expect_identical(json_parse("-1.797693134862315807e308"), -xmax)
+  expect_identical(json_parse("-1.797693134862315808e308"), -Inf)
+  # the 309-digit integer one below the round-to-Inf midpoint is finite, and
+  # the midpoint itself rounds to Inf
+  below <- paste0(
+    "17976931348623158079372897140530341507993413271003782693617377898044",
+    "49682927647509466490179775872070963302864166928879109465555478519404",
+    "02630657488671505820681908902000708383676273854845817711531764475730",
+    "27006985557136695962284291481986083493647529271907416844436551070434",
+    "2711559699508093042880177904174497791"
+  )
+  expect_identical(nchar(below), 309L)
+  expect_identical(json_parse(below), xmax)
+  expect_identical(json_parse(paste0("-", below)), -xmax)
+  # the same edges inside an atomic array, which is a separate fill path
+  expect_identical(json_parse(paste0("[", below, ",1e309]")), c(xmax, Inf))
+  # the subnormal end: the smallest subnormal and what rounds to zero
+  expect_identical(json_parse("4.9e-324"), 2^-1074)
+  expect_identical(json_parse("2.5e-324"), 2^-1074)
+  expect_identical(json_parse("2e-324"), 0)
+  expect_identical(json_parse("[1e-400,4.9e-324]"), c(0, 2^-1074))
+})
+
+test_that("colliding keys do not make the data frame index quadratic", {
+  # The key index hashed with unseeded FNV-1a, whose low bits can be made to
+  # collide at will: 2^15 such keys took 5.7 s against 0.014 s (#44). The
+  # pairs below are a Joux multicollision on the low 24 bits of that hash;
+  # 14 of them give 2^14 keys that all landed in one probe chain.
+  skip_on_cran()
+  pairs <- list(
+    c("b3k8", "cpqf"), c("a6q2", "c2ba"), c("a839", "cisb"), c("a1i8", "bpcv"),
+    c("b7ez", "crna"), c("aw73", "bgfa"), c("a6p0", "c2aa"), c("anv8", "cc0a"),
+    c("b7z8", "cpdf"), c("b7k8", "cpar"), c("b3f8", "ctdv"), c("b2i8", "cugv"),
+    c("b7g8", "cper"), c("aqt6", "cb2a")
+  )
+  keys <- ""
+  for (p in pairs) keys <- c(paste0(keys, p[1]), paste0(keys, p[2]))
+  expect_length(unique(keys), 2^14)
+  body <- function(k) {
+    paste0("[{", paste0('"', k, '":1', collapse = ","), "}]")
+  }
+  control <- vapply(seq_along(keys), function(i) {
+    paste(sample(c(letters, 0:9), 56, TRUE), collapse = "")
+  }, "")
+  t_ctl <- system.time(json_parse(body(control), data_frame = TRUE))[["elapsed"]]
+  t_col <- system.time(json_parse(body(keys), data_frame = TRUE))[["elapsed"]]
+  expect_lt(t_col, max(10 * t_ctl, 0.25))
 })

@@ -199,6 +199,17 @@ not built.
   ordinary list recursion and stays correct either way, so it tests nothing
   here; the case that matters is a nested value in a cell. `test-write.R` and
   `test-parse.R` pin both.
+- **The cell budget is per document, not per frame.** `zu_df_left` is reset
+  from the call's budget by `zu_finish()` and by the NDJSON driver (once per
+  body), and each frame is charged as soon as its columns are known, before
+  its cells are built, so a frame nested in a cell draws on what its parent
+  left. Do not go back to handing each frame `df`: forty frames each under the
+  cap then built forty times it.
+- **The key index hash is seeded per call** (`zu_hash_reseed()` beside the
+  budget reset) and finished with a full 64-bit mix. Unseeded FNV-1a let a
+  body choose colliding keys; the seed is what makes the "linear" claim below
+  hold for adversarial input, not only for typical input. Column order is by
+  first appearance, never by hash, so the seed changes no result.
 - **A data frame's size comes from the union of the keys, not from the
   input.** Records that share no keys ask for one column per record, so 72 kB
   of JSON becomes a 5000 x 5000 frame. `ZUJSON_MAX_DF_CELLS` (5e7, the
@@ -270,14 +281,19 @@ not built.
   depth, so validation is safe at any depth; the cap protects the tree
   builder, which validation never runs, and enforcing it would mean walking
   the document on every call to return `FALSE` for something RFC 8259 §9
-  calls valid.
+  calls valid. NDJSON lines are read with `ZUJSON_NDJSON_LINE_FLAGS`, which is
+  this set minus `ALLOW_BOM` (the body's one BOM is stripped before framing):
+  a restriction of the shared set, never an addition to it.
 - **`NA_INTEGER == INT_MIN`.** A JSON `-2147483648` must promote to `double`,
   or it comes back as `NA`. Same for anything above `INT_MAX`.
 - **A number past double range is `Inf`, not a parse failure.** RFC 8259 caps
   no magnitude, so `1e309` is valid JSON; rejecting it would let one absurd
   value make a whole response body unreadable. `YYJSON_READ_BIGNUM_AS_RAW`
-  delivers the token as `YYJSON_TYPE_RAW` and `zu_raw_dbl()` converts it. Two
-  traps: it must be **`R_strtod`, not `strtod`**, which reads the decimal
+  delivers the token as `YYJSON_TYPE_RAW` and `zu_raw_dbl()` converts it: a
+  finite one (an integer wider than uint64) by yyjson's correctly rounded
+  `yyjson_read_number()`, and only one past double range by `R_strtod`, whose
+  rounding is not correct and once put 1 in 1000 such integers 1 ulp off. Two
+  traps: the overflow path must be **`R_strtod`, not `strtod`**, which reads the decimal
   point in the current C locale and would turn `1.5e400` into `1` under a
   comma-decimal locale; and **not `ALLOW_INF_AND_NAN`**, which also accepts
   the bare `Infinity`/`NaN` literals that are not JSON, and since the flags

@@ -11,16 +11,43 @@
  * class attached to the place that knows what actually went wrong.
  * ------------------------------------------------------------------------- */
 
+unsigned long zu_err_line = 0;
+
+size_t zu_utf8_cut(const char *s, size_t len, size_t max) {
+    size_t n = len < max ? len : max;
+    /* Find where the last sequence in the first n bytes starts, and drop it
+     * when its lead byte promises more bytes than the cut kept. */
+    size_t j = n;
+    while (j > 0 && n - j < 4 && ((unsigned char) s[j - 1] & 0xC0) == 0x80) j--;
+    if (j == 0) return n;
+    unsigned char lead = (unsigned char) s[j - 1];
+    size_t want = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+    return (j - 1) + want > n ? j - 1 : n;
+}
+
+/* The message is built from UTF-8 parts -- every key and name in it went
+ * through translateCharUTF8() -- so it is marked UTF-8 rather than native,
+ * and a cut at the buffer's end is moved back to a character boundary. Both
+ * left messages that were not valid UTF-8 (#53). */
 void zu_stop(const char *cls, const char *fmt, ...) {
     char msg[512];
+    size_t off = 0;
+    if (zu_err_line) {
+        int k = snprintf(msg, sizeof(msg), "line %lu: ", zu_err_line);
+        off = k > 0 ? (size_t) k : 0;
+        zu_err_line = 0;
+    }
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
+    int w = vsnprintf(msg + off, sizeof(msg) - off, fmt, ap);
     va_end(ap);
+    if (w > 0 && off + (size_t) w >= sizeof(msg))
+        msg[zu_utf8_cut(msg, sizeof(msg) - 1, sizeof(msg) - 1)] = '\0';
 
     const char *fields[] = {"message", "call", ""};
     SEXP cond = PROTECT(Rf_mkNamed(VECSXP, fields));
-    SET_VECTOR_ELT(cond, 0, Rf_mkString(msg));
+    SEXP text = PROTECT(Rf_mkCharCE(msg, CE_UTF8));
+    SET_VECTOR_ELT(cond, 0, Rf_ScalarString(text));
     SET_VECTOR_ELT(cond, 1, R_NilValue);
 
     SEXP klass = PROTECT(Rf_allocVector(STRSXP, 4));
@@ -33,7 +60,7 @@ void zu_stop(const char *cls, const char *fmt, ...) {
     SEXP call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
     Rf_eval(call, R_BaseEnv);            /* longjmps out */
 
-    UNPROTECT(3);                        /* not reached */
+    UNPROTECT(4);                        /* not reached */
     Rf_error("zujson: stop() returned");
 }
 

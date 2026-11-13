@@ -71,7 +71,10 @@ zu_df_cells <- function() {
   # number the parser enforces rather than the one that was asked for. The
   # ceiling comes from the compiled object because R_xlen_t is int on a build
   # without long vectors, where a literal 2^52 would be wrong.
-  min(as.double(n), zu_build_info()$max_xlen)
+  #
+  # Floored as well: C truncates the budget to a whole number of cells, so a
+  # fractional option would be reported as given and enforced one lower (#55).
+  floor(min(as.double(n), zu_build_info()$max_xlen))
 }
 
 zu_check_df <- function(x, arg = "data_frame") {

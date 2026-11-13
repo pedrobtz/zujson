@@ -2,17 +2,6 @@
 
 ## Bug fixes
 
-* A body built by `json_write_ndjson()` past 2^31 - 1 bytes raises
-  `zujson_write_error`, pointing to `json_write_ndjson_raw()`, instead of a
-  bare error from `paste()`. `json_write_ndjson_raw()` builds its bytes
-  directly rather than from that string, so it has no such ceiling (#47).
-
-* The native memory behind a parse or a write can no longer leak if R fails
-  an allocation at the moment it is handed to R. The external pointer that
-  owns it is now made before the memory exists (#52).
-
-## Bug fixes
-
 * A `POSIXlt` data frame column, and a `POSIXlt` passed to
   `json_write_ndjson()`, now raise `zujson_unsupported_type`. Both used to
   skip the check and write the 11 broken-down time fields as data: in an
@@ -32,11 +21,49 @@
 * A zero-row data frame is charged one nesting level, for the `[]` it writes,
   not two. It used to be refused at a depth `json_parse()` reads back (#57).
 
+* `data_frame = TRUE` no longer slows to quadratic time on keys chosen to
+  collide in its index. The key hash is now seeded per call and fully mixed;
+  2^15 colliding keys took 5.7 s, against 0.014 s for ordinary ones, and could
+  not be interrupted until the end (#44).
+
+* An integer too wide for 64 bits parses to the nearest `double`. About 1 in
+  1000 came back one unit in the last place off, and differently from the same
+  number written with `.0` (#46).
+
+* Every `json_parse_ndjson()` error names its line, including those raised
+  while building a record: an embedded NUL, nesting too deep, a duplicate key
+  in a data frame record, the cell limit (#54).
+
+* Condition messages are valid UTF-8 and marked as such. A long non-ASCII key
+  or column name could be cut mid-character (#53).
+
+* `zujson_info()$max_df_cells` reports a fractional option as the whole number
+  of cells the parser enforces (#55).
+
+* A body built by `json_write_ndjson()` past 2^31 - 1 bytes raises
+  `zujson_write_error`, pointing to `json_write_ndjson_raw()`, instead of a
+  bare error from `paste()`. `json_write_ndjson_raw()` builds its bytes
+  directly rather than from that string, so it has no such ceiling (#47).
+
+* The native memory behind a parse or a write can no longer leak if R fails
+  an allocation at the moment it is handed to R. The external pointer that
+  owns it is now made before the memory exists (#52).
+
 ## Behaviour changes
 
 * `bit64::integer64` vectors are written as the 64-bit integers they hold,
   with `NA` as `null`. They used to fall through to their storage type and be
   written as the doubles their bits spell, so `1` went out as `5e-324` (#48).
+
+* The data frame cell limit, `zujson_info()$max_df_cells`, now bounds the
+  whole document rather than each frame in it, as `?json_parse` describes it.
+  Many frames each under the limit used to be accepted together, however far
+  past it their total went (#45).
+
+* `json_parse_ndjson()` accepts a UTF-8 byte order mark only at the start of
+  the body, and a body that is only a BOM is empty. A BOM at the start of any
+  later line was accepted, and a BOM-only first line was an error (#56).
+||||||| a962bb7
 
 # zujson 0.1.0
 

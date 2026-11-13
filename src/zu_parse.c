@@ -1,5 +1,7 @@
 #include <limits.h>
+#include <stdint.h>
 #include <string.h>
+#include <time.h>
 #include "zujson.h"
 
 /* ---------------------------------------------------------------------------
@@ -71,13 +73,32 @@ static int zu_fits_int(int64_t v) {
  *    buffer is always yyjson's own padded copy and never R's memory.
  *    R_strtod stops at the first byte that cannot continue a number, so it
  *    consumes the token and nothing after it.
- *  - R_strtod rather than strtod because strtod reads the decimal point in the
- *    C locale of the moment: under a comma-decimal locale it would stop at the
- *    '.' of 1.5e400 and return 1. R_strtod is the one R's own as.numeric()
- *    uses, so the value is what writing the token in R source would give --
- *    Inf here, and the nearest double for a 30-digit integer. */
+ *
+ * A finite token -- an integer wider than uint64 -- is read again by yyjson's
+ * own number reader without BIGNUM_AS_RAW, which is correctly rounded, so it
+ * gives the nearest double and the same double as the token spelled with
+ * ".0". R_strtod was used for these too, and it is not correctly rounded: about
+ * 1 in 1000 came back 1 ulp off (#46). That reader needs a NUL-terminated
+ * token, so it is copied onto the R_alloc stack, released by the vmax pair.
+ *
+ * Only a token yyjson refuses as out of range goes to R_strtod, for its Inf.
+ * R_strtod rather than strtod, because strtod reads the decimal point in the C
+ * locale of the moment: under a comma-decimal locale it would stop at the '.'
+ * of 1.5e400 and return 1. */
 static double zu_raw_dbl(yyjson_val *v) {
-    return R_strtod(yyjson_get_raw(v), NULL);
+    const char *tok = yyjson_get_raw(v);
+    size_t len = yyjson_get_len(v);
+    const void *vmax = vmaxget();
+    char *buf = R_alloc(len + 1, 1);
+    memcpy(buf, tok, len);
+    buf[len] = '\0';
+    yyjson_val num;
+    yyjson_read_err err;
+    double out = yyjson_read_number(buf, &num, YYJSON_READ_NOFLAG, NULL, &err)
+                     ? yyjson_get_num(&num)
+                     : R_strtod(buf, NULL);
+    vmaxset(vmax);
+    return out;
 }
 
 /* "Is this value a number?", asked by every path that sorts numbers from
@@ -399,24 +420,62 @@ typedef struct { const char *dat; size_t len; } zu_key;
  * product is the one cost here not already bounded by the length of the input,
  * so it is checked as each new column appears -- before the allocation, not
  * after it. */
+/* The budget is for the document, not for each frame in it (#45): every frame
+ * draws on what the frames before it left, so forty frames each under the cap
+ * cannot together build forty times it. `zu_df_left` is set from the call's
+ * budget by each entry point -- once per document, and once per NDJSON body --
+ * and charged as soon as a frame's columns are known, before its cells are
+ * filled, so a frame nested in a cell draws on what its parent left. */
+static R_xlen_t zu_df_left = 0, zu_df_total = 0;
+
+static void zu_df_reset(R_xlen_t df) {
+    zu_df_left = df;
+    zu_df_total = df;
+}
+
 static void zu_df_budget(R_xlen_t n_keys, R_xlen_t n_rows, R_xlen_t cells) {
     if (n_rows > 0 && n_keys > cells / n_rows)
         zu_stop("zujson_limit_error",
-                "a data frame of %lld records x %lld columns is over the "
-                "%lld cell limit",
-                (long long) n_rows, (long long) n_keys, (long long) cells);
+                "a data frame of %lld records x %lld columns needs more than "
+                "the %lld cells left of the document's %lld cell limit",
+                (long long) n_rows, (long long) n_keys, (long long) cells,
+                (long long) zu_df_total);
 }
 
-/* FNV-1a over the key's bytes: no allocation, and enough spread for the short
- * keys a response body carries. */
+/* splitmix64's finaliser: every output bit depends on every input bit. */
+static uint64_t zu_mix64(uint64_t z) {
+    z += 0x9E3779B97F4A7C15ULL;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+
+/* Reseeded at every parse. Unpredictable from the body is all it needs to be:
+ * the address of a stack slot (ASLR), the clock, and a call counter. */
+static uint64_t zu_hash_seed = 0;
+
+static void zu_hash_reseed(void) {
+    static uint64_t calls = 0;
+    int here;
+    zu_hash_seed = zu_mix64((uint64_t) (uintptr_t) &here
+                            ^ ((uint64_t) time(NULL) << 21)
+                            ^ (++calls * 0x9E3779B97F4A7C15ULL));
+}
+
+/* FNV-1a over the key's bytes, seeded and finished with a full mix. Unseeded
+ * FNV-1a let a body choose keys that collide in the index: the low k bits of
+ * its state depend only on the low k bits before, so a Joux multicollision is
+ * found in milliseconds, and 2^15 such keys took 5.7 s instead of 0.014 s
+ * (#44). The seed changes where every key lands on every call, and the mix
+ * makes the masked bits depend on the whole state. */
 static uint64_t zu_key_hash(const char *d, size_t n) {
-    uint64_t h = 14695981039346656037ULL;
+    uint64_t h = 14695981039346656037ULL ^ zu_hash_seed;
     size_t i;
     for (i = 0; i < n; i++) {
         h ^= (unsigned char) d[i];
         h *= 1099511628211ULL;
     }
-    return h;
+    return zu_mix64(h ^ zu_hash_seed);
 }
 
 /* The union of the keys, in first-seen order, which is the column order.
@@ -486,6 +545,7 @@ static R_xlen_t zu_key_find(const zu_keyset *ks, const char *d, size_t len) {
         if (ks->keys[k].len == len && memcmp(ks->keys[k].dat, d, len) == 0)
             return k;
         i = (i + 1) & ks->mask;
+        zu_tick();                    /* per probe, not per member (#44) */
     }
 }
 
@@ -509,6 +569,7 @@ static void zu_collect_keys(yyjson_val *arr, zu_keyset *ks) {
                 if (ks->keys[k].len == kl &&
                     memcmp(ks->keys[k].dat, kd, kl) == 0) break;
                 i = (i + 1) & ks->mask;
+                zu_tick();
             }
             if (ks->slot[i]) {                 /* already a column */
                 k = ks->slot[i] - 1;
@@ -517,7 +578,7 @@ static void zu_collect_keys(yyjson_val *arr, zu_keyset *ks) {
                             "record %lld has the key \"%.*s\" twice, and a "
                             "data frame column can hold only one value",
                             (long long) (r + 1),
-                            (int) (kl > 64 ? 64 : kl), kd);
+                            (int) zu_utf8_cut(kd, kl, 64), kd);
                 ks->row[k] = r;
             } else {                           /* a column not seen before */
                 zu_df_budget(ks->n_keys + 1, ks->n_rows, ks->cells);
@@ -630,9 +691,12 @@ static SEXP zu_arr_df(yyjson_val *arr, zu_mode mode, R_xlen_t df, int depth) {
     yyjson_arr_foreach(arr, idx, max, row)
         cap += (R_xlen_t) yyjson_obj_size(row);
 
-    zu_keyset_init(&ks, cap, n_rows, df);
+    zu_keyset_init(&ks, cap, n_rows, zu_df_left);
     zu_collect_keys(arr, &ks);
     n_keys = ks.n_keys;
+    /* zu_collect_keys() refused any key past zu_df_left / n_rows, so this
+     * cannot go negative. */
+    zu_df_left -= n_rows * n_keys;
 
     out = PROTECT(Rf_allocVector(VECSXP, n_keys));
     nms = PROTECT(Rf_allocVector(STRSXP, n_keys));
@@ -757,6 +821,8 @@ static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, R_xlen_t df, int depth) {
  * document was never bare across anything that can longjmp (#52). */
 static SEXP zu_finish(SEXP owner, yyjson_doc *doc, zu_mode mode, R_xlen_t df) {
     zu_n_vals = 0;
+    zu_hash_reseed();
+    zu_df_reset(df);
     SEXP out = PROTECT(zu_to_sexp(yyjson_doc_get_root(doc), mode, df, 1));
     zu_extptr_release(owner);
     UNPROTECT(1);
@@ -800,6 +866,7 @@ static SEXP zu_read_mem(const char *dat, size_t len, zu_mode mode,
 }
 
 SEXP zujson_parse_str(SEXP x_, SEXP simplify_, SEXP df_) {
+    zu_err_line = 0;
     SEXP s = STRING_ELT(x_, 0);
     if (s == NA_STRING)
         zu_stop("zujson_parse_error", "`x` is NA, not JSON text");
@@ -811,11 +878,13 @@ SEXP zujson_parse_str(SEXP x_, SEXP simplify_, SEXP df_) {
 }
 
 SEXP zujson_parse_raw(SEXP x_, SEXP simplify_, SEXP df_) {
+    zu_err_line = 0;
     return zu_read_mem((const char *) RAW(x_), (size_t) XLENGTH(x_),
                        (zu_mode) Rf_asInteger(simplify_), zu_df_arg(df_));
 }
 
 SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_) {
+    zu_err_line = 0;
     const char *path = Rf_translateCharUTF8(STRING_ELT(path_, 0));
     yyjson_read_err err;
     SEXP owner = PROTECT(zu_owner_doc());
@@ -890,14 +959,29 @@ static void zu_line_bounds(const char *dat, size_t len, size_t i,
     *stop = j;
 }
 
+/* Lines are read with the shared flags minus ALLOW_BOM. A BOM can only start
+ * a body, so one is stripped there, before the first line is framed, and any
+ * other is refused. Reading every line with ALLOW_BOM accepted one at the start
+ * of any line, while a BOM-only first line was "empty" rather than blank
+ * (#56). This is ZUJSON_READ_FLAGS restricted, not a second flag set: nothing
+ * is accepted here that the shared set refuses. */
+#define ZUJSON_NDJSON_LINE_FLAGS (ZUJSON_READ_FLAGS & ~YYJSON_READ_ALLOW_BOM)
+
 static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
                            R_xlen_t df) {
-    size_t i, stop, next;
+    size_t i, stop, next, start = 0;
+
+    zu_n_vals = 0;
+    zu_hash_reseed();
+    zu_df_reset(df);
+    if (len >= 3 && (unsigned char) dat[0] == 0xEF &&
+        (unsigned char) dat[1] == 0xBB && (unsigned char) dat[2] == 0xBF)
+        start = 3;
 
     /* Counted first so the result can be allocated exactly once. Scanning for
      * newlines twice is far cheaper than growing a list record by record. */
     R_xlen_t n = 0;
-    for (i = 0; i < len; i = next) {
+    for (i = start; i < len; i = next) {
         zu_line_bounds(dat, len, i, &stop, &next);
         if (!zu_line_blank(dat + i, stop - i)) n++;
     }
@@ -906,7 +990,7 @@ static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
     R_xlen_t k = 0;
     unsigned long lineno = 0;
 
-    for (i = 0; i < len; i = next) {
+    for (i = start; i < len; i = next) {
         zu_line_bounds(dat, len, i, &stop, &next);
         lineno++;
         if (zu_line_blank(dat + i, stop - i)) continue;  /* blank lines are not records */
@@ -914,7 +998,7 @@ static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
         yyjson_read_err err;
         SEXP owner = PROTECT(zu_owner_doc());
         yyjson_doc *doc = yyjson_read_opts((char *) dat + i, stop - i,
-                                           ZUJSON_READ_FLAGS, NULL, &err);
+                                           ZUJSON_NDJSON_LINE_FLAGS, NULL, &err);
         /* The line number is the whole point: "invalid JSON at byte 41827" is
          * useless in a 10,000-record body. */
         if (!doc)
@@ -923,7 +1007,10 @@ static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
                     lineno, (unsigned long) err.pos, err.msg);
 
         zu_owner_hold(owner, doc);
+        /* Errors raised while the record is built name the line too (#54). */
+        zu_err_line = lineno;
         SET_VECTOR_ELT(out, k++, zu_to_sexp(yyjson_doc_get_root(doc), mode, df, 1));
+        zu_err_line = 0;
         zu_extptr_release(owner);
         UNPROTECT(1);
 
@@ -935,6 +1022,7 @@ static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
 }
 
 SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_, SEXP df_) {
+    zu_err_line = 0;
     SEXP s = STRING_ELT(x_, 0);
     if (s == NA_STRING)
         zu_stop("zujson_parse_error", "`x` is NA, not NDJSON text");
@@ -944,6 +1032,7 @@ SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_, SEXP df_) {
 }
 
 SEXP zujson_parse_ndjson_raw(SEXP x_, SEXP simplify_, SEXP df_) {
+    zu_err_line = 0;
     return zu_read_ndjson((const char *) RAW(x_), (size_t) XLENGTH(x_),
                           (zu_mode) Rf_asInteger(simplify_),
                           zu_df_arg(df_));

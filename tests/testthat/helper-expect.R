@@ -22,3 +22,24 @@ nested_list <- function(depth) {
   for (i in seq_len(depth)) x <- list(x)
   x
 }
+
+# A bit64::integer64 vector built without bit64: the class over a double whose
+# bits are the int64 value, given as its low and high 32-bit words. Reading the
+# words back as a double in the same byte order makes the bits right on any
+# endianness. hi = NA_integer_ with lo = 0 is INT64_MIN, bit64's NA.
+as_int64 <- function(lo, hi = ifelse(lo < 0L, -1L, 0L)) {
+  words <- as.vector(rbind(as.integer(lo), as.integer(hi)))
+  bits <- writeBin(words, raw(), endian = "little")
+  structure(
+    readBin(bits, "double", n = length(lo), endian = "little"),
+    class = "integer64"
+  )
+}
+
+# `x` wrapped in `k` single-element lists, so it sits at depth k + its own.
+wrap_list <- function(x, k) {
+  for (i in seq_len(k)) {
+    x <- list(x)
+  }
+  x
+}

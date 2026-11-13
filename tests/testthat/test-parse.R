@@ -76,12 +76,12 @@ test_that("a number too large for a double becomes Inf, not an error", {
   expect_identical(json_parse("[1e308]"), 0x1.1ccf385ebc8ap+1023)
   expect_identical(json_parse("[1e-400]"), 0)          # underflow, not overflow
 
-  # An integer wider than int64 keeps going through the same path, and there
-  # as.numeric() is the expectation on purpose: that path is zu_raw_dbl(),
-  # which is R_strtod, so the value tracks R's reader even where R's reader is
-  # the less accurate of the two.
+  # An integer wider than int64 is the nearest double: the correctly rounded
+  # value, written in hex so no decimal reader is in the oracle. This used to
+  # assert as.numeric(), which is not correctly rounded -- on arm64, where long
+  # double is double, it is many ulps off for this very token (#46).
   expect_identical(json_parse("[123456789012345678901234567890]"),
-                   as.numeric("123456789012345678901234567890"))
+                   0x1.8ee90ff6c373ep+96)
 
   # and it is an ordinary double once there, so it simplifies with the rest
   expect_identical(json_parse("[1e309, 2]"), c(Inf, 2))

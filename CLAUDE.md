@@ -29,11 +29,16 @@ at the cost of a mapping you can hold in your head, it is the wrong choice.
 
 The specification is
 [.agents/design-zujson.md](.agents/design-zujson.md), and it outranks this
-file. Its numbered sections §1–§15: §5–§6 the type mappings and why they are
+file. The plan is [.agents/roadmap.md](.agents/roadmap.md), versions 0.2.0 to
+1.0.0. **This package owns both.** The RFC in `pedrobtz/packages` is only a
+pointer to them, so a design or roadmap change is a pull request here, not
+an RFC (this overrides "One design" in `.claude/shared/workflow.md`). Design
+§16 is the rule the roadmap grows by: the default mapping stops changing at
+0.2.0, and everything after is opt-in. Its numbered sections §1–§16: §5–§6 the type mappings and why they are
 what they are, §7 the error model, §8 the memory model, §9 depth limiting,
 §13 NDJSON and the deferred streaming design, §14 acceptance criteria, §15
-what is left. Read §15 before starting anything: its list is kept current
-with strikethroughs.
+what came after v1 (closed), §16 growth after v1. Read the roadmap before
+starting anything: it says what is next and in which version.
 
 ## Current state
 
@@ -55,14 +60,13 @@ objects into a data frame wherever one appears; native-code CI through the
 reusable workflows in `pedrobtz/r-actions`; a number past double range
 parsing as `Inf` rather than failing the read.
 
-**One acceptance criterion is open, deliberately.** Design §14.9 names
-`zuhttp`. The shapes it will use are covered in `test-roundtrip.R`, but the
-criterion cannot close until there is something to integrate with. **What is
-left in design §15 is blocked on that same thing**, not on effort here: a
-public C API through `LinkingTo: zujson`, and the streaming object of §13.
-Both are worth doing only once a real caller exists to shape them. The
-design still calls `zuhttp` a skeleton; it now imports `zujson (>= 0.1.0)`
-(local clone, 2026-11-11), so check whether that has unblocked them.
+**One acceptance criterion is open.** Design §14.9 names `zuhttp`. The
+shapes it uses are covered in `test-roundtrip.R`, and the criterion closes
+with the integration test of roadmap Stage 2.7. **The two things design §15
+left, a public C API through `LinkingTo: zujson` and the streaming object of
+§13, are unblocked**: `zuhttp` is released and imports `zujson (>= 0.1.0)`.
+They are roadmap v0.8.0 and v0.3.0. The C API still merges only with a
+sibling's pull request that calls it.
 
 ## Versions and dependents
 

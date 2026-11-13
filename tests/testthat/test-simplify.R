@@ -259,3 +259,69 @@ test_that("empty objects give a frame with rows and no columns", {
   expect_s3_class(d, "data.frame")
   expect_identical(dim(d), c(2L, 0L))
 })
+
+test_that("the cell budget bounds the whole document, not each frame", {
+  # Each frame used to get the full budget, so many frames under it together
+  # built far more than it allows (#45).
+  two <- '[[{"a":1,"b":2},{"a":3,"b":4}],[{"c":1,"d":2},{"c":3,"d":4}]]'
+  for (budget in c(4, 7)) {
+    withr::local_options(zujson.max_df_cells = budget)
+    expect_error(json_parse(two, data_frame = TRUE),
+                 class = "zujson_limit_error")
+  }
+  withr::local_options(zujson.max_df_cells = 8)
+  expect_length(json_parse(two, data_frame = TRUE), 2L)
+
+  # a frame nested in a cell of another draws on the same budget
+  nested <- '[{"a":1,"in":[{"x":1},{"x":2}]},{"a":2,"in":[{"x":3},{"x":4}]}]'
+  withr::local_options(zujson.max_df_cells = 7)
+  expect_error(json_parse(nested, data_frame = TRUE),
+               class = "zujson_limit_error")
+  withr::local_options(zujson.max_df_cells = 8)
+  expect_s3_class(json_parse(nested, data_frame = TRUE), "data.frame")
+
+  # and one NDJSON body is one document
+  body <- '[{"a":1,"b":2},{"a":3,"b":4}]\n[{"c":1,"d":2},{"c":3,"d":4}]\n'
+  withr::local_options(zujson.max_df_cells = 7)
+  expect_error(json_parse_ndjson(body, data_frame = TRUE),
+               class = "zujson_limit_error")
+  withr::local_options(zujson.max_df_cells = 8)
+  expect_length(json_parse_ndjson(body, data_frame = TRUE), 2L)
+})
+
+test_that("the cell budget is straddled at limit - 1, limit and limit + 1", {
+  # A 10 x 10 frame under budgets of 99, 100 and 101, through json_parse()
+  # and through NDJSON (#34).
+  ragged <- function(n) {
+    paste0("[", paste0(sprintf('{"k%d":%d}', seq_len(n), seq_len(n)),
+                       collapse = ","), "]")
+  }
+  for (budget in c(99, 100, 101)) {
+    withr::local_options(zujson.max_df_cells = budget)
+    if (budget < 100) {
+      expect_error(json_parse(ragged(10), data_frame = TRUE),
+                   class = "zujson_limit_error")
+      expect_error(json_parse_ndjson(ragged(10), data_frame = TRUE),
+                   class = "zujson_limit_error")
+    } else {
+      expect_identical(dim(json_parse(ragged(10), data_frame = TRUE)),
+                       c(10L, 10L))
+      expect_identical(dim(json_parse_ndjson(ragged(10),
+                                             data_frame = TRUE)[[1]]),
+                       c(10L, 10L))
+    }
+  }
+})
+
+test_that("zujson_info() reports the whole-number budget the parser enforces", {
+  # A fractional option was reported as given and truncated in C (#55).
+  withr::local_options(zujson.max_df_cells = 399.9)
+  expect_identical(zujson_info()$max_df_cells, 399)
+  rows <- paste0("[", paste(rep(paste0("{", paste(sprintf('"k%d":1', 1:20),
+                                                 collapse = ","), "}"), 20),
+                            collapse = ","), "]")
+  expect_error(json_parse(rows, data_frame = TRUE), class = "zujson_limit_error")
+  withr::local_options(zujson.max_df_cells = 400.5)
+  expect_identical(zujson_info()$max_df_cells, 400)
+  expect_identical(dim(json_parse(rows, data_frame = TRUE)), c(20L, 20L))
+})

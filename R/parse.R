@@ -25,8 +25,8 @@
 #' Numbers become `integer` when they fit in R's 32-bit integer and `double`
 #' otherwise. A number too large for any finite `double` becomes `Inf` rather
 #' than an error: RFC 8259 sets no limit on the magnitude of a number, so
-#' `1e309` is valid JSON, and the value is the one `as.numeric()` gives the
-#' same token. A `null` inside an array being simplified becomes `NA`; a `null`
+#' `1e309` is valid JSON. An integer too wide for 64 bits becomes the nearest
+#' `double`, the same one the token spelled with `.0` gives. A `null` inside an array being simplified becomes `NA`; a `null`
 #' anywhere else becomes `NULL`. Strings arrive as UTF-8.
 #'
 #' # Simplification modes
@@ -72,10 +72,13 @@
 #' no keys at all would ask for one cell per record *per record*, and no limit
 #' on the size of the body can stand in for a limit on that, because the growth
 #' is quadratic in it. More than `zujson_info()$max_df_cells` cells raises
-#' `zujson_limit_error`. The default is 50 million -- clear of any real tabular
+#' `zujson_limit_error`. The limit is for the whole document, not for each frame:
+#' every data frame in it, nested or side by side, draws on one budget, and
+#' `json_parse_ndjson()` counts one body as one document. The default is 50 million -- clear of any real tabular
 #' response, and far below what a hostile one reaches -- and
 #' `options(zujson.max_df_cells = )` changes it for the session.
-#' `zujson_info()$max_df_cells` reports the limit in force.
+#' `zujson_info()$max_df_cells` reports the limit in force, as a whole number
+#' of cells.
 #'
 #' Setting it larger than any frame that could be built switches the check off;
 #' the option is clamped to what an `R_xlen_t` holds, which is what

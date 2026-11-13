@@ -175,3 +175,62 @@ test_that("NDJSON refuses the same data frames json_write() refuses", {
   expect_error(json_write(bad), class = "zujson_unsupported_type")
   expect_error(json_write_ndjson(bad), class = "zujson_unsupported_type")
 })
+
+test_that("every NDJSON error names its line", {
+  # Errors raised while building a record, not reading it, named no line
+  # (#54). Each is on line 3.
+  deep <- paste0(strrep("[", 1001), strrep("]", 1001))
+  cases <- list(
+    zujson_parse_error = '1\n2\n{oops}\n',
+    zujson_parse_error = '1\n2\n"\\u0000"\n',
+    zujson_depth_error = paste0("1\n2\n", deep, "\n"),
+    zujson_parse_error = '1\n\n[{"k":1,"k":2}]\n'
+  )
+  for (i in seq_along(cases)) {
+    cnd <- tryCatch(json_parse_ndjson(cases[[i]], data_frame = TRUE),
+                    zujson_error = function(e) e)
+    expect_s3_class(cnd, names(cases)[i])
+    expect_match(conditionMessage(cnd), "line 3", info = cases[[i]])
+  }
+  withr::local_options(zujson.max_df_cells = 1)
+  cnd <- tryCatch(json_parse_ndjson('1\n2\n[{"a":1,"b":2}]\n', data_frame = TRUE),
+                  zujson_error = function(e) e)
+  expect_s3_class(cnd, "zujson_limit_error")
+  expect_match(conditionMessage(cnd), "line 3")
+  # and the line context does not leak into the next, unrelated error
+  cnd <- tryCatch(json_parse("[1,"), zujson_error = function(e) e)
+  expect_no_match(conditionMessage(cnd), "line")
+})
+
+test_that("a BOM is accepted only at the start of an NDJSON body", {
+  # Each line was read with ALLOW_BOM, so one was accepted on any line, while
+  # a BOM-only first line was "empty" rather than blank (#56).
+  bom <- "\ufeff"
+  expect_identical(json_parse_ndjson(paste0(bom, "1\n2\n")), list(1L, 2L))
+  expect_identical(json_parse_ndjson(charToRaw(paste0(bom, "1\n2\n"))),
+                   list(1L, 2L))
+  expect_identical(json_parse_ndjson(paste0(bom, "\n1\n")), list(1L))
+  expect_identical(json_parse_ndjson(bom), list())
+  expect_error(json_parse_ndjson(paste0("1\n", bom, "2\n")),
+               class = "zujson_parse_error")
+})
+
+test_that("the depth limit holds per record, in both directions", {
+  # NDJSON has its own read and write drivers, and the limit had only been
+  # straddled through json_parse() and json_write() (#33).
+  limit <- zujson_info()$max_depth
+  for (d in c(limit - 1L, limit)) {
+    expect_identical(json_parse_ndjson(paste0("1\n", nested_json(d), "\n"))[[2]],
+                     json_parse(nested_json(d)))
+    expect_no_error(json_write_ndjson(list(1L, nested_list(d))))
+  }
+  expect_error(json_parse_ndjson(paste0("1\n", nested_json(limit + 1L), "\n")),
+               class = "zujson_depth_error")
+  expect_error(json_write_ndjson(list(1L, nested_list(limit + 1L))),
+               class = "zujson_depth_error")
+  # a data frame record with a container in a cell: array, row, cell
+  cell <- function(k) paste0('[{"c":', nested_json(k), "}]")
+  expect_no_error(json_parse_ndjson(cell(limit - 2L), data_frame = TRUE))
+  expect_error(json_parse_ndjson(cell(limit - 1L), data_frame = TRUE),
+               class = "zujson_depth_error")
+})

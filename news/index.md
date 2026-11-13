@@ -55,6 +55,21 @@
   number of cells the parser enforces
   ([\#55](https://github.com/pedrobtz/zujson/issues/55)).
 
+- A body built by
+  [`json_write_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+  past 2^31 - 1 bytes raises `zujson_write_error`, pointing to
+  [`json_write_ndjson_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md),
+  instead of a bare error from
+  [`paste()`](https://rdrr.io/r/base/paste.html).
+  [`json_write_ndjson_raw()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+  builds its bytes directly rather than from that string, so it has no
+  such ceiling ([\#47](https://github.com/pedrobtz/zujson/issues/47)).
+
+- The native memory behind a parse or a write can no longer leak if R
+  fails an allocation at the moment it is handed to R. The external
+  pointer that owns it is now made before the memory exists
+  ([\#52](https://github.com/pedrobtz/zujson/issues/52)).
+
 ### Behaviour changes
 
 - `bit64::integer64` vectors are written as the 64-bit integers they

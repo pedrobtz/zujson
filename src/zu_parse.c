@@ -753,14 +753,13 @@ static SEXP zu_to_sexp(yyjson_val *v, zu_mode mode, R_xlen_t df, int depth) {
 
 /* ---- entry points -------------------------------------------------------- */
 
-/* The doc is handed to R before any SEXP is allocated: zu_stop() and R's
- * allocators both longjmp, and a bare yyjson_doc * would leak on either. */
-static SEXP zu_finish(yyjson_doc *doc, zu_mode mode, R_xlen_t df) {
+/* `owner` already holds `doc`: the caller made it before reading, so the
+ * document was never bare across anything that can longjmp (#52). */
+static SEXP zu_finish(SEXP owner, yyjson_doc *doc, zu_mode mode, R_xlen_t df) {
     zu_n_vals = 0;
-    SEXP owner = PROTECT(zu_extptr_own_doc(doc));
     SEXP out = PROTECT(zu_to_sexp(yyjson_doc_get_root(doc), mode, df, 1));
     zu_extptr_release(owner);
-    UNPROTECT(2);
+    UNPROTECT(1);
     return out;
 }
 
@@ -786,6 +785,7 @@ static SEXP zu_finish(yyjson_doc *doc, zu_mode mode, R_xlen_t df) {
 static SEXP zu_read_mem(const char *dat, size_t len, zu_mode mode,
                         R_xlen_t df) {
     yyjson_read_err err;
+    SEXP owner = PROTECT(zu_owner_doc());
     /* No YYJSON_READ_INSITU: yyjson copies into its own buffer, so R's
      * immutable CHAR()/RAW() data is never written through. */
     yyjson_doc *doc = yyjson_read_opts((char *) dat, len,
@@ -793,7 +793,10 @@ static SEXP zu_read_mem(const char *dat, size_t len, zu_mode mode,
     if (!doc)
         zu_stop("zujson_parse_error", "invalid JSON at byte %lu: %s",
                 (unsigned long) err.pos, err.msg);
-    return zu_finish(doc, mode, df);
+    zu_owner_hold(owner, doc);
+    SEXP out = zu_finish(owner, doc, mode, df);
+    UNPROTECT(1);
+    return out;
 }
 
 SEXP zujson_parse_str(SEXP x_, SEXP simplify_, SEXP df_) {
@@ -815,6 +818,7 @@ SEXP zujson_parse_raw(SEXP x_, SEXP simplify_, SEXP df_) {
 SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_) {
     const char *path = Rf_translateCharUTF8(STRING_ELT(path_, 0));
     yyjson_read_err err;
+    SEXP owner = PROTECT(zu_owner_doc());
     yyjson_doc *doc = yyjson_read_file(path, ZUJSON_READ_FLAGS, NULL, &err);
     if (!doc) {
         /* "could not open it" and "its contents are not JSON" are different
@@ -825,7 +829,11 @@ SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_) {
         zu_stop("zujson_parse_error", "invalid JSON in '%s' at byte %lu: %s",
                 path, (unsigned long) err.pos, err.msg);
     }
-    return zu_finish(doc, (zu_mode) Rf_asInteger(simplify_), zu_df_arg(df_));
+    zu_owner_hold(owner, doc);
+    SEXP out = zu_finish(owner, doc, (zu_mode) Rf_asInteger(simplify_),
+                         zu_df_arg(df_));
+    UNPROTECT(1);
+    return out;
 }
 
 /* Validation parses and throws the tree away: yyjson has no cheaper
@@ -904,6 +912,7 @@ static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
         if (zu_line_blank(dat + i, stop - i)) continue;  /* blank lines are not records */
 
         yyjson_read_err err;
+        SEXP owner = PROTECT(zu_owner_doc());
         yyjson_doc *doc = yyjson_read_opts((char *) dat + i, stop - i,
                                            ZUJSON_READ_FLAGS, NULL, &err);
         /* The line number is the whole point: "invalid JSON at byte 41827" is
@@ -913,7 +922,7 @@ static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
                     "invalid JSON on line %lu at byte %lu of that line: %s",
                     lineno, (unsigned long) err.pos, err.msg);
 
-        SEXP owner = PROTECT(zu_extptr_own_doc(doc));
+        zu_owner_hold(owner, doc);
         SET_VECTOR_ELT(out, k++, zu_to_sexp(yyjson_doc_get_root(doc), mode, df, 1));
         zu_extptr_release(owner);
         UNPROTECT(1);

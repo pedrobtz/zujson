@@ -163,9 +163,12 @@ not built.
 - **Anything holding heap state across a longjmp must be owned by R.**
   `zu_stop()`, `R_CheckUserInterrupt()` and every R allocator jump straight
   past a `free()`. The `yyjson_doc`, the `yyjson_mut_doc` and yyjson's output
-  buffer are each handed to a finalized external pointer (`zu_extptr_own_*`
-  in `src/zu_cond.c`) *before* the first thing that can jump, and released
-  eagerly on the success path. This is why no C function here has an error
+  buffer are each owned by a finalized external pointer (`zu_owner_*` in
+  `src/zu_cond.c`) that is made *before* the resource exists: owner, then
+  allocate, then `zu_owner_hold()` on the next line, which allocates nothing.
+  Making the owner after the resource was itself the first thing that could
+  jump, three R allocations with the resource bare (#52): keep that order at
+  every new call site. Owners are released eagerly on the success path. This is why no C function here has an error
   cleanup path, and why `zu_stop()` is safe to call from anywhere in either
   recursion. Finalizers clear the address before freeing, which is what makes
   eager release and a later GC pass mutually safe.

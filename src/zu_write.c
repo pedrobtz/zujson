@@ -536,11 +536,12 @@ SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
     int pretty = Rf_asLogical(pretty_);
     int as_raw = Rf_asLogical(as_raw_);
 
+    SEXP owner = PROTECT(zu_owner_mut_doc());
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     if (!doc)
         zu_stop("zujson_write_error",
                 "out of memory allocating a JSON document");
-    SEXP owner = PROTECT(zu_extptr_own_mut_doc(doc));
+    zu_owner_hold(owner, doc);
 
     zu_wctx ctx = { doc, Rf_asLogical(auto_unbox_), 0 };
     yyjson_mut_doc_set_root(doc, zu_from_sexp(x_, &ctx, 1));
@@ -549,15 +550,13 @@ SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
     yyjson_write_err werr;
     yyjson_write_flag flg = pretty ? YYJSON_WRITE_PRETTY_TWO_SPACES
                                    : YYJSON_WRITE_NOFLAG;
+    /* The buffer is malloc'd by yyjson and the allocations below can
+     * longjmp, so its owner exists before it does. */
+    SEXP buf_owner = PROTECT(zu_owner_buf());
     char *buf = yyjson_mut_write_opts(doc, flg, NULL, &len, &werr);
-    if (!buf) {
-        UNPROTECT(1);                    /* owner's finalizer frees the doc */
+    if (!buf)                            /* the owners' finalizers free the doc */
         zu_stop("zujson_write_error", "could not write JSON: %s", werr.msg);
-    }
-
-    /* The buffer is malloc'd by yyjson and the allocation below can longjmp,
-     * so R takes ownership of it before anything else happens. */
-    SEXP buf_owner = PROTECT(zu_extptr_own_buf(buf));
+    zu_owner_hold(buf_owner, buf);
     SEXP out;
     if (as_raw) {
         out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) len));
@@ -581,14 +580,18 @@ SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
  * NDJSON
  *
  * One line per record, so each record gets its own document and its own write.
- * Returns the lines; joining them is left to R, which can do it in one call.
+ * The lines are joined here, into the one value the caller gets: a string, or
+ * with `as_raw` bytes built directly. Joining in R with paste() raised R's own
+ * bare error past 2^31 - 1 bytes, and the raw variant was built from that
+ * string, so it could never exceed one either (#47).
  *
  * There is deliberately no `pretty` here. Indented JSON contains newlines, and
  * a newline inside a record is precisely what NDJSON framing cannot survive --
  * a pretty-printed NDJSON stream is a corrupt one, not a nicer one.
  * ------------------------------------------------------------------------- */
-SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
+SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_, SEXP as_raw_) {
     int auto_unbox = Rf_asLogical(auto_unbox_);
+    int as_raw = Rf_asLogical(as_raw_);
     /* A POSIXlt is a list, so without this each of its 11 fields became a
      * record (#40). */
     zu_refuse_posixlt(x_);
@@ -612,14 +615,16 @@ SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
         n = XLENGTH(x_);
     }
 
-    SEXP out = PROTECT(Rf_allocVector(STRSXP, n));
+    SEXP lines = PROTECT(Rf_allocVector(STRSXP, n));
+    size_t total = 0;
 
     for (R_xlen_t i = 0; i < n; i++) {
+        SEXP owner = PROTECT(zu_owner_mut_doc());
         yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
         if (!doc)
-        zu_stop("zujson_write_error",
-                "out of memory allocating a JSON document");
-        SEXP owner = PROTECT(zu_extptr_own_mut_doc(doc));
+            zu_stop("zujson_write_error",
+                    "out of memory allocating a JSON document");
+        zu_owner_hold(owner, doc);
 
         zu_wctx ctx = { doc, auto_unbox, 0 };
         yyjson_mut_doc_set_root(doc, is_df
@@ -628,21 +633,21 @@ SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
 
         size_t len = 0;
         yyjson_write_err werr;
+        SEXP buf_owner = PROTECT(zu_owner_buf());
         char *buf = yyjson_mut_write_opts(doc, YYJSON_WRITE_NOFLAG, NULL,
                                           &len, &werr);
-        if (!buf) {
-            UNPROTECT(1);
+        if (!buf)
             zu_stop("zujson_write_error",
                     "could not write NDJSON record %ld: %s",
                     (long) (i + 1), werr.msg);
-        }
+        zu_owner_hold(buf_owner, buf);
 
-        SEXP buf_owner = PROTECT(zu_extptr_own_buf(buf));
         if (len > (size_t) INT_MAX)
             zu_stop("zujson_write_error",
                     "NDJSON record %ld is %lu bytes, too long for an R string",
                     (long) (i + 1), (unsigned long) len);
-        SET_STRING_ELT(out, i, Rf_mkCharLenCE(buf, (int) len, CE_UTF8));
+        SET_STRING_ELT(lines, i, Rf_mkCharLenCE(buf, (int) len, CE_UTF8));
+        total += len + 1;                /* the record and its newline */
 
         zu_extptr_release(buf_owner);
         zu_extptr_release(owner);
@@ -651,6 +656,34 @@ SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
         if ((i & 0x3FF) == 0) R_CheckUserInterrupt();
     }
 
-    UNPROTECT(2);   /* out, and the plan's keeper */
+    /* One copy into the result. A string is one CHARSXP, so it is refused past
+     * INT_MAX bytes with the class the contract promises; bytes have no such
+     * ceiling, which is why the error points there. */
+    SEXP out;
+    char *dst;
+    if (as_raw) {
+        out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) total));
+        dst = (char *) RAW(out);
+    } else {
+        if (total > (size_t) INT_MAX)
+            zu_stop("zujson_write_error",
+                    "the NDJSON body is %lu bytes, too long for a single R "
+                    "string; use json_write_ndjson_raw()",
+                    (unsigned long) total);
+        out = PROTECT(Rf_allocVector(STRSXP, 1));
+        dst = R_alloc(total > 0 ? total : 1, 1);
+    }
+    size_t at = 0;
+    for (R_xlen_t i = 0; i < n; i++) {
+        SEXP line = STRING_ELT(lines, i);
+        size_t len = (size_t) LENGTH(line);
+        memcpy(dst + at, CHAR(line), len);
+        dst[at + len] = '\n';
+        at += len + 1;
+    }
+    if (!as_raw)
+        SET_STRING_ELT(out, 0, Rf_mkCharLenCE(dst, (int) total, CE_UTF8));
+
+    UNPROTECT(3);   /* out, lines, and the plan's keeper */
     return out;
 }

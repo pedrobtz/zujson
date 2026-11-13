@@ -2,6 +2,17 @@
 
 ## Bug fixes
 
+* A body built by `json_write_ndjson()` past 2^31 - 1 bytes raises
+  `zujson_write_error`, pointing to `json_write_ndjson_raw()`, instead of a
+  bare error from `paste()`. `json_write_ndjson_raw()` builds its bytes
+  directly rather than from that string, so it has no such ceiling (#47).
+
+* The native memory behind a parse or a write can no longer leak if R fails
+  an allocation at the moment it is handed to R. The external pointer that
+  owns it is now made before the memory exists (#52).
+
+## Bug fixes
+
 * A `POSIXlt` data frame column, and a `POSIXlt` passed to
   `json_write_ndjson()`, now raise `zujson_unsupported_type`. Both used to
   skip the check and write the 11 broken-down time fields as data: in an

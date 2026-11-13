@@ -698,8 +698,8 @@ json_read_options(allow = c("comments", "trailing_commas", "inf_nan",
 For configuration files, not for response bodies. `ZUJSON_READ_FLAGS` stays
 the shared base; a dialect is an addition made in one place and handed to
 every route, so `json_validate(x, options)` and `json_parse(x, options)`
-agree. A dialect is refused for NDJSON and for streams: a `/* */` comment may hold a raw
-newline, which is the one thing line framing cannot survive.
+agree. A dialect is refused for NDJSON and for streams: a `/* */` comment
+may hold a raw newline, which is the one thing line framing cannot survive.
 
 `ALLOW_INVALID_UNICODE` is **not** exposed as a dialect. If a sibling shows a
 need, it is `invalid_utf8 = "replace"` (U+FFFD), done by the package, so no

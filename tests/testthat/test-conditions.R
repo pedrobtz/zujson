@@ -65,3 +65,24 @@ test_that("condition messages are valid UTF-8 however they are cut", {
   expect_true(validUTF8(conditionMessage(cnd)))
   expect_identical(Encoding(conditionMessage(cnd)), "UTF-8")
 })
+
+test_that("a message stays valid UTF-8 when the name it quotes is not", {
+  # #53 marked every message UTF-8, but a quoted name went through unchecked,
+  # so a name with invalid bytes made a message marked UTF-8 that was not
+  # (#76). The bad byte is shown as <ff>.
+  bad <- "c\xffd"
+  marked <- bad
+  Encoding(marked) <- "UTF-8"
+  for (nm in list(bad, marked)) {
+    d <- structure(list(a = quote(x)), class = "data.frame", row.names = 1L)
+    names(d) <- nm
+    cnd <- tryCatch(json_write(d), zujson_error = function(e) e)
+    expect_s3_class(cnd, "zujson_unsupported_type")
+    expect_true(validUTF8(conditionMessage(cnd)))
+    expect_match(conditionMessage(cnd), "<ff>", fixed = TRUE)
+    d2 <- structure(list(1:2, 1:3), names = c("a", nm), class = "data.frame",
+                    row.names = 1:2)
+    cnd <- tryCatch(json_write(d2), zujson_error = function(e) e)
+    expect_true(validUTF8(conditionMessage(cnd)))
+  }
+})

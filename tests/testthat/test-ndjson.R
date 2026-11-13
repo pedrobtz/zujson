@@ -136,9 +136,19 @@ test_that("NDJSON writing refuses input that is not a sequence of records", {
 })
 
 test_that("a record that cannot be serialized fails with its position", {
+  # The writer named no record: "cannot serialize an R object of type 'raw'"
+  # for record 5001 of a body said nothing about where (#70).
   cnd <- tryCatch(json_write_ndjson(list(list(a = 1L), list(b = as.raw(1)))),
                   zujson_error = function(e) e)
-  expect_s3_class(cnd, "zujson_error")
+  expect_s3_class(cnd, "zujson_unsupported_type")
+  expect_match(conditionMessage(cnd), "record 2")
+  d <- data.frame(id = 1:3)
+  d$v <- list(1, 2, sum)
+  cnd <- tryCatch(json_write_ndjson(d), zujson_error = function(e) e)
+  expect_match(conditionMessage(cnd), "record 3")
+  # and the record context does not leak into the next, unrelated error
+  cnd <- tryCatch(json_write(list(sum)), zujson_error = function(e) e)
+  expect_no_match(conditionMessage(cnd), "record")
 })
 
 test_that("bad arguments are rejected", {

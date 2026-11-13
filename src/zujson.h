@@ -49,6 +49,9 @@ void zu_stop(const char *cls, const char *fmt, ...);
  * it; every .Call entry point that can raise clears it too, so a longjmp that
  * did not pass through zu_stop() cannot leave it behind for the next call. */
 extern unsigned long zu_err_line;
+/* What zu_err_line counts: "line" for the NDJSON reader, "record" for the
+ * NDJSON writer, which sets it while each record is built (#70). */
+extern const char *zu_err_what;
 
 /* The longest prefix of `s` (of `len` bytes) no longer than `max` bytes that
  * does not end inside a UTF-8 sequence: for quoting a key into a message. */
@@ -61,6 +64,12 @@ size_t zu_utf8_cut(const char *s, size_t len, size_t max);
  * raise their own classed error on NULL. May allocate on the R_alloc stack, so
  * wrap a loop in vmaxget()/vmaxset(); never call it on NA or CE_BYTES. */
 const char *zu_utf8(SEXP s);
+
+/* A name for quoting into a condition message: always valid UTF-8, with any
+ * byte that is not shown as <xx>. zu_stop() marks every message UTF-8, so a
+ * name passed through unvalidated made a message marked UTF-8 that was not
+ * (#76). Allocates on the R_alloc stack; never fails. */
+const char *zu_msg_str(SEXP s);
 
 /* ---- external pointers owning C memory across a longjmp (zu_cond.c) ---- */
 

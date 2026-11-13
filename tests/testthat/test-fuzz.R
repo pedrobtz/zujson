@@ -10,7 +10,7 @@
 # The generators and the iteration count live in helper-fuzz.R.
 
 test_that("random bytes never crash and never escape the condition contract", {
-  set.seed(20260908)
+  withr::local_seed(20260908)
   bad <- character()
 
   for (i in seq_len(fuzz_iters())) {
@@ -35,7 +35,7 @@ test_that("random bytes never crash and never escape the condition contract", {
 })
 
 test_that("raw and character input agree on every random input", {
-  set.seed(1L)
+  withr::local_seed(1L)
   for (i in seq_len(fuzz_iters(200L))) {
     src <- json_soup(sample(40L, 1L))
     # Only ASCII here: the two paths legitimately differ on how a native-encoded
@@ -47,7 +47,7 @@ test_that("raw and character input agree on every random input", {
 })
 
 test_that("valid JSON built at random survives a round trip", {
-  set.seed(42L)
+  withr::local_seed(42L)
 
   gen <- function(depth) {
     if (depth > 3L) return(sample(list(1L, 2.5, TRUE, "s", NULL), 1L)[[1]])
@@ -62,16 +62,23 @@ test_that("valid JSON built at random survives a round trip", {
     )
   }
 
+  # The value oracle: with auto_unbox = FALSE every scalar is a one-element
+  # array, and with simplify = "none" every array is a list, so the mapping is
+  # lossless once each atomic leaf is wrapped in list(). The generator only
+  # makes writable values, so json_write() is called unguarded: an error here
+  # is the bug this test exists to find, not a case to skip (#74).
+  as_parsed <- function(x) {
+    if (is.null(x)) return(NULL)
+    if (is.list(x)) return(lapply(x, as_parsed))
+    list(x)
+  }
   for (i in seq_len(fuzz_iters(200L))) {
     x <- gen(1L)
-    txt <- tryCatch(json_write(x), zujson_error = function(e) NULL)
-    if (is.null(txt)) next
-    # What is asserted is that the output re-parses, not that it equals `x`:
-    # the type mapping is documented as lossy in specific places (a named list
-    # of one element unboxes, NULL drops out), and those are pinned exactly in
-    # test-roundtrip.R rather than approximately here.
+    txt <- json_write(x, auto_unbox = FALSE)
     expect_true(json_validate(txt), info = txt)
-    expect_identical(outcome(json_parse(txt)), "value", info = txt)
+    expect_identical(json_parse(txt, simplify = "none"), as_parsed(x),
+                     info = txt)
+    expect_identical(outcome(json_parse(json_write(x))), "value", info = txt)
   }
 })
 

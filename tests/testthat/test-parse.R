@@ -325,6 +325,7 @@ test_that("colliding keys do not make the data frame index quadratic", {
   body <- function(k) {
     paste0("[{", paste0('"', k, '":1', collapse = ","), "}]")
   }
+  withr::local_seed(44L)
   control <- vapply(seq_along(keys), function(i) {
     paste(sample(c(letters, 0:9), 56, TRUE), collapse = "")
   }, "")
@@ -386,4 +387,93 @@ test_that("json_parse_file() reads through a connection, whatever the file is", 
   expect_error(json_parse_file(dir), class = "zujson_io_error")
   expect_error(json_parse_file(file.path(dir, "absent.json")),
                class = "zujson_arg_error")
+})
+
+test_that("json_parse_file() reads a FIFO, and a file named like a device", {
+  # file() warned before opening a FIFO, and the warning became an error; and
+  # it treats "stdin" as the process's stdin, not as the file of that name
+  # (#66).
+  skip_on_os("windows")
+  dir <- withr::local_tempdir()
+  withr::local_dir(dir)
+  # written through "./" because file() would read "stdin" as the device too
+  writeBin(charToRaw("[42]"), "./stdin")
+  expect_identical(json_parse_file("stdin"), 42L)
+  writeBin(charToRaw("[43]"), "./clipboard")
+  expect_identical(json_parse_file("clipboard"), 43L)
+
+  skip_if(nzchar(Sys.which("mkfifo")) == FALSE, "no mkfifo")
+  fifo <- file.path(dir, "fifo")
+  system2("mkfifo", fifo)
+  system(paste("printf '[7,8]' >", shQuote(fifo)), wait = FALSE)
+  expect_identical(json_parse_file(fifo), 7:8)
+})
+
+test_that("an unreadable file is zujson_io_error under warn = 2 as well", {
+  skip_on_os("windows")
+  path <- withr::local_tempfile(fileext = ".json")
+  writeBin(charToRaw("[1]"), path)
+  Sys.chmod(path, "000")
+  withr::defer(Sys.chmod(path, "644"))
+  skip_if(file.access(path, 4) == 0, "running as a user who can read it")
+  expect_error(json_parse_file(path), class = "zujson_io_error")
+  withr::local_options(warn = 2)
+  expect_error(json_parse_file(path), class = "zujson_io_error")
+})
+
+test_that("the file is read whole however it falls across the chunk size", {
+  # The multi-chunk join ran only for files over 16 MiB and no test reached
+  # it (#71). The chunk size is an argument, so it is straddled small here.
+  dir <- withr::local_tempdir()
+  for (size in c(1L, 7L, 8L, 9L, 16L, 17L, 33L)) {
+    bytes <- as.raw(seq_len(size) %% 256L)
+    path <- file.path(dir, paste0("f", size))
+    writeBin(bytes, path)
+    expect_identical(zu_read_file(path, n = 8L), bytes, info = size)
+  }
+  body <- paste0("[", paste(1:500, collapse = ","), "]")
+  path <- file.path(dir, "body.json")
+  writeBin(charToRaw(body), path)
+  expect_identical(zu_read_file(path, n = 64L), charToRaw(body))
+  expect_identical(json_parse_file(path), 1:500)
+})
+
+test_that("an unmarked UTF-8 string parses as UTF-8 in a UTF-8 locale", {
+  # The commonest real input -- rawToChar() or readLines() output -- went
+  # through a needless conversion, and its success path was untested (#67).
+  skip_if_not(isTRUE(l10n_info()[["UTF-8"]]), "not a UTF-8 session")
+  native <- rawToChar(as.raw(c(0x7b, 0x22, 0x6e, 0x22, 0x3a, 0x22, 0x63,
+                               0x61, 0x66, 0xc3, 0xa9, 0x22, 0x7d)))
+  marked <- native
+  Encoding(marked) <- "UTF-8"
+  expect_identical(Encoding(native), "unknown")
+  expect_identical(json_parse(native), json_parse(marked))
+  expect_identical(json_parse(native)$n, "café")
+  expect_identical(json_parse_ndjson(native), json_parse_ndjson(marked))
+  expect_true(json_validate(native))
+  # invalid bytes in such a string are still refused, by yyjson
+  bad <- rawToChar(as.raw(c(0x22, 0xff, 0x22)))
+  expect_error(json_parse(bad), class = "zujson_parse_error")
+  expect_false(json_validate(bad))
+})
+
+test_that("native text in a non-UTF-8 locale is converted, not refused", {
+  # In a UTF-8 session native text needs no conversion (#67); in another
+  # charset it goes through the checked conversion, whose success path is
+  # pinned here so it cannot start refusing good text unnoticed.
+  skip_on_os("windows")
+  locales <- c("en_US.ISO8859-1", "en_US.ISO-8859-1", "de_DE.ISO8859-1",
+               "en_GB.ISO8859-1")
+  here <- Sys.getlocale("LC_CTYPE")
+  usable <- Filter(function(loc) {
+    ok <- suppressWarnings(nzchar(Sys.setlocale("LC_CTYPE", loc)))
+    Sys.setlocale("LC_CTYPE", here)
+    ok
+  }, locales)
+  skip_if(length(usable) == 0L, "no ISO-8859-1 locale on this machine")
+  withr::local_locale(c(LC_CTYPE = usable[[1]]))
+  doc <- rawToChar(as.raw(c(0x22, 0x63, 0x61, 0x66, 0xe9, 0x22)))  # "café"
+  expect_identical(enc2utf8(json_parse(doc)), "café")
+  expect_identical(json_write_raw(rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xe9)))),
+                   charToRaw(enc2utf8('"café"')))
 })

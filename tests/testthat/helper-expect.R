@@ -1,7 +1,13 @@
 # Serializing to an exact string is the whole point of a serializer, so the
 # assertion is on the bytes rather than on a re-parsed structure.
+# identical() compares characters, not a CHARSXP's encoding mark, so the mark
+# is asserted separately: non-ASCII output must be marked UTF-8 (#72).
 expect_json <- function(x, expected, ...) {
-  testthat::expect_identical(json_write(x, ...), expected)
+  out <- json_write(x, ...)
+  testthat::expect_identical(out, expected)
+  if (!all(utf8ToInt(enc2utf8(out)) < 128L)) {
+    testthat::expect_identical(Encoding(out), "UTF-8")
+  }
 }
 
 # A round trip is only interesting when it lands on the *same* object, so this

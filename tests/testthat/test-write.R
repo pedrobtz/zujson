@@ -535,3 +535,37 @@ test_that("a string that cannot be converted to UTF-8 is refused, not rewritten"
   Encoding(marked) <- "UTF-8"
   expect_identical(json_write_raw(marked), charToRaw('"café"'))
 })
+
+test_that("non-ASCII output is marked UTF-8, and an unmarked input is too", {
+  # expect_json() could not see the encoding mark, so output marked native
+  # would have passed every test (#72); and the unmarked-in-a-UTF-8-locale
+  # input path was untested (#67).
+  expect_json("café", '"café"')
+  expect_json(list(k = "ü"), '{"k":"ü"}')
+  expect_identical(Encoding(json_write_ndjson(list("é"))), "UTF-8")
+  expect_identical(json_write_raw("café"), charToRaw(enc2utf8('"café"')))
+  skip_if_not(isTRUE(l10n_info()[["UTF-8"]]), "not a UTF-8 session")
+  native <- rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xc3, 0xa9)))
+  marked <- native
+  Encoding(marked) <- "UTF-8"
+  expect_identical(json_write(native), json_write(marked))
+  expect_identical(json_write_raw(list(native)), json_write_raw(list(marked)))
+  bad <- rawToChar(as.raw(c(0x61, 0xff)))
+  expect_error(json_write(bad), class = "zujson_write_error")
+})
+
+test_that("a data frame's columns must be named, unless it has none", {
+  # The guard was untested -- removed, the frame was written with an empty key
+  # -- and a hand-built frame with no columns and no names was refused (#73).
+  partial <- structure(list(1, 2), names = c("a", ""), class = "data.frame",
+                       row.names = 1L)
+  nameless <- structure(list(1), class = "data.frame", row.names = 1L)
+  for (d in list(partial, nameless)) {
+    expect_error(json_write(d), class = "zujson_unsupported_type")
+    expect_error(json_write_ndjson(d), class = "zujson_unsupported_type")
+  }
+  expect_json(structure(list(), class = "data.frame"), "[]")
+  expect_identical(json_write_ndjson(structure(list(), class = "data.frame")), "")
+  expect_json(structure(list(), class = "data.frame", row.names = 1:2),
+              "[{},{}]")
+})

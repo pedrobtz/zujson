@@ -334,7 +334,7 @@ test_that("POSIXct just below a day boundary floors to 23:59:59, never 24:00", {
               '"0000-01-01T23:59:59Z"')
   expect_json(.POSIXct(-719527 * 86400 - 0.5, tz = "UTC"),
               '"0000-01-01T23:59:59Z"')
-  for (k in c(-354285, -2, -1, 0, 1, 19675, 2932896)) {
+  for (k in c(-354284, -2, -1, 0, 1, 19675, 2932896)) {
     for (eps in c(1e-12, 1e-9, 1e-6, 0.5)) {
       x <- .POSIXct(k * 86400 - eps, tz = "UTC")
       want <- format(

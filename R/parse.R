@@ -44,8 +44,13 @@
 #' `preserve` keeps the type and gives up the uniform shape, on the view that a
 #' field which is usually a number and occasionally a string is a bug worth
 #' seeing. `coerce` is the opt-in for callers who would rather have the vector:
-#' it follows R's own promotion, so the strings are exactly what
-#' `as.character()` produces. A nested object or array is never coerced away.
+#' the numbers in an array are gathered into one numeric vector and turned to
+#' strings by `as.character()`, `true`/`false` become `"TRUE"`/`"FALSE"`, and
+#' `null` stays `NA`. Two consequences follow from using `as.character()`: the
+#' strings follow the session's `OutDec` and `scipen` options, and how one
+#' number is written depends on the others in the same array -- `[100000,"a"]`
+#' gives `"100000"` but `[100000,1.5,"a"]` gives `"1e+05"`. A nested object or
+#' array is never coerced away.
 #'
 #' # Data frames
 #'
@@ -88,6 +93,13 @@
 #'
 #' Nesting deeper than 1000 levels is rejected with a `zujson_depth_error`,
 #' which is what makes the parser safe to point at an untrusted response body.
+#'
+#' A character `x` is read as UTF-8 JSON: text marked UTF-8 or plain ASCII as
+#' it is, and text in another encoding converted first. Text that is not valid
+#' in the encoding it declares -- typically a body read with `readLines()`
+#' under the C locale -- raises `zujson_parse_error` rather than having its
+#' bytes rewritten, and `json_validate()` returns `FALSE` for it. The raw route
+#' has no such step: pass the bytes as they arrived.
 #'
 #' A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
 #' forbids emitting one but allows ignoring it, and real APIs emit them. The
@@ -198,8 +210,38 @@ json_parse_file <- function(path, simplify = TRUE, data_frame = FALSE) {
     zu_abort("zujson_io_error",
              paste0("could not read '", path, "': it is a directory."))
   }
-  .Call(C_zujson_parse_file, path, zu_check_simplify(simplify),
+  # The bytes are read here and parsed by the raw route. Opening the file in
+  # R means the path is in the encoding R's own file functions use: the C
+  # layer used to open a *translated* copy, which under the C locale was
+  # "c<c3><a9>.json", a file that does not exist (#50). It also makes the file
+  # route the raw route, one reader with one set of error classes.
+  .Call(C_zujson_parse_raw, zu_read_file(path), zu_check_simplify(simplify),
         zu_check_df(data_frame))
+}
+
+# A file's bytes, in chunks, so a FIFO (whose size is 0) and a file past
+# 2^31 - 1 bytes (past what one readBin() call returns) both read whole.
+# Failing to open or read it is zujson_io_error, warning included: under
+# options(warn = 2) R's "cannot open file" warning is itself an error.
+zu_read_file <- function(path) {
+  io_error <- function(e) {
+    zu_abort("zujson_io_error",
+             paste0("could not read '", path, "': ", conditionMessage(e)))
+  }
+  tryCatch({
+    con <- file(path, open = "rb")
+    on.exit(close(con))
+    chunks <- list()
+    repeat {
+      chunk <- readBin(con, "raw", n = 16777216L)
+      if (length(chunk) == 0L) break
+      chunks[[length(chunks) + 1L]] <- chunk
+    }
+    switch(min(length(chunks), 2L) + 1L,
+           raw(),
+           chunks[[1L]],
+           unlist(chunks, use.names = FALSE))
+  }, error = io_error, warning = io_error)
 }
 
 #' Check whether input is valid JSON

@@ -306,10 +306,21 @@ not built.
   2^53**: a double that is already whole *is* that integer at any magnitude,
   so converting is lossless; 2^53 is where consecutive integers stop being
   representable, which is a different question and the wrong test.
-- **Every string crossing into JSON goes through `Rf_translateCharUTF8`**,
-  wrapped in `vmaxget`/`vmaxset` so a long character vector does not
-  accumulate one R_alloc buffer per element. Every string coming back is
+- **Every string crossing into JSON goes through `zu_utf8()`**, never
+  `Rf_translateCharUTF8()` directly, wrapped in `vmaxget`/`vmaxset` so a long
+  character vector does not accumulate one R_alloc buffer per element.
+  `Rf_translateCharUTF8()` never fails: it rewrites a byte it cannot convert as
+  the text `<xx>`, which sent `"caf<c3><a9>"` under the C locale and let
+  invalid UTF-8 validate as `TRUE` (#42). `zu_utf8()` passes UTF-8 and ASCII
+  through, refuses latin1's five undefined bytes, converts native text with a
+  checked `Riconv`, and returns `NULL` on failure for the caller to raise. The
+  same applies to the character inputs of `json_parse()`,
+  `json_parse_ndjson()` and `json_validate()`. Every string coming back is
   marked `CE_UTF8`, accurate only because yyjson's UTF-8 validation is on.
+- **`json_parse_file()` reads its bytes in R** (`zu_read_file()`) and parses
+  them through `zujson_parse_raw`; there is no C file entry point. R opens the
+  path in the encoding its own file functions use. Handing C a translated path
+  opened the wrong file under the C locale (#50); do not move the read back.
 - **`I()` is checked before the class dispatch**, because `I()` prepends to
   the class vector.
 - **Partial names produce an array, not `{"a":1,"":2}`.** `zu_fully_named()`

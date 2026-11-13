@@ -1,5 +1,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
+#include <R_ext/Riconv.h>
 #include "zujson.h"
 
 /* ---------------------------------------------------------------------------
@@ -23,6 +25,50 @@ size_t zu_utf8_cut(const char *s, size_t len, size_t max) {
     unsigned char lead = (unsigned char) s[j - 1];
     size_t want = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
     return (j - 1) + want > n ? j - 1 : n;
+}
+
+/* Bytes R's latin1 leaves undefined. R reads "latin1" as Windows-1252, where
+ * these five have no character, so translateCharUTF8() writes "<81>" for them
+ * on every platform. */
+static int zu_cp1252_undefined(const char *c) {
+    for (; *c; c++) {
+        unsigned char b = (unsigned char) *c;
+        if (b == 0x81 || b == 0x8D || b == 0x8F || b == 0x90 || b == 0x9D)
+            return 1;
+    }
+    return 0;
+}
+
+static int zu_ascii(const char *c) {
+    for (; *c; c++)
+        if ((unsigned char) *c >= 0x80) return 0;
+    return 1;
+}
+
+const char *zu_utf8(SEXP s) {
+    const char *c = CHAR(s);
+    cetype_t ce = Rf_getCharCE(s);
+    if (ce == CE_UTF8 || zu_ascii(c)) return c;   /* validated by yyjson */
+    if (ce == CE_LATIN1)
+        return zu_cp1252_undefined(c) ? NULL : Rf_translateCharUTF8(s);
+
+    /* Native and not ASCII: convert from the locale's charset with a check,
+     * through R's own iconv, which reports the byte it cannot convert rather
+     * than substituting for it. The buffer comes first: R_alloc can longjmp,
+     * and the iconv descriptor is not R's to free. A byte of any charset R
+     * runs in is at most four of UTF-8. */
+    size_t in_left = strlen(c), out_cap = 4 * in_left + 1, out_left = out_cap;
+    char *buf = R_alloc(out_cap, 1), *out = buf;
+    void *cd = Riconv_open("UTF-8", "");
+    if (cd == (void *) -1) return NULL;
+    const char *in = c;
+    size_t r = Riconv(cd, &in, &in_left, &out, &out_left);
+    if (r != (size_t) -1)
+        r = Riconv(cd, NULL, NULL, &out, &out_left);   /* flush any state */
+    Riconv_close(cd);
+    if (r == (size_t) -1 || in_left != 0 || out_left == 0) return NULL;
+    *out = '\0';
+    return buf;
 }
 
 /* The message is built from UTF-8 parts -- every key and name in it went

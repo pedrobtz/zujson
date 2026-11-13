@@ -332,3 +332,58 @@ test_that("colliding keys do not make the data frame index quadratic", {
   t_col <- system.time(json_parse(body(keys), data_frame = TRUE))[["elapsed"]]
   expect_lt(t_col, max(10 * t_ctl, 0.25))
 })
+
+test_that("a string that cannot be converted to UTF-8 is refused, not rewritten", {
+  # R's conversion substitutes "<xx>" for a byte it cannot convert, so an
+  # unmarked non-ASCII string under the C locale came back as the ASCII text
+  # "caf<c3><a9>", and invalid UTF-8 validated as TRUE (#42).
+  cafe <- rawToChar(as.raw(c(0x22, 0x63, 0x61, 0x66, 0xc3, 0xa9, 0x22)))
+  bad <- rawToChar(as.raw(c(0x5b, 0x22, 0xe9, 0x22, 0x5d)))
+  # The C locale is ASCII on Unix, which is the case this pins. Windows maps
+  # it to a code page in which these bytes convert, so it is skipped there.
+  skip_on_os("windows")
+  withr::local_locale(c(LC_CTYPE = "C"))
+  expect_error(json_parse(cafe), class = "zujson_parse_error")
+  expect_error(json_parse_ndjson(cafe), class = "zujson_parse_error")
+  expect_false(json_validate(cafe))
+  expect_error(json_parse(bad), class = "zujson_parse_error")
+  expect_false(json_validate(bad))
+  # the raw route reads the bytes as the UTF-8 JSON is, in any locale
+  expect_identical(json_parse(charToRaw(cafe)), "café")
+  # a string marked UTF-8 is not converted at all
+  marked <- cafe
+  Encoding(marked) <- "UTF-8"
+  expect_identical(json_parse(marked), "café")
+})
+
+test_that("json_parse_file() opens a non-ASCII path in any locale", {
+  # The R check used the native path and the C open a translated one, so
+  # under the C locale a readable file was "failed to read" (#50).
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "cé.json")
+  skip_if_not(file.create(path), "the file system refuses the name")
+  writeBin(charToRaw('{"a":[1,2]}'), path)
+  expect_identical(json_parse_file(path), list(a = 1:2))
+  # The C locale is ASCII on Unix, which is the case this pins. Windows maps
+  # it to a code page in which these bytes convert, so it is skipped there.
+  skip_on_os("windows")
+  native <- rawToChar(charToRaw(enc2utf8(path)))   # unmarked bytes
+  withr::local_locale(c(LC_CTYPE = "C"))
+  expect_identical(json_parse_file(native), list(a = 1:2))
+})
+
+test_that("json_parse_file() reads through a connection, whatever the file is", {
+  # The bytes are read in R and parsed by the raw route, so the file route is
+  # the raw route: the same value and the same error classes (#50).
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "big.json")
+  body <- paste0("[", paste(seq_len(200000), collapse = ","), "]")
+  writeBin(charToRaw(body), path)
+  expect_identical(json_parse_file(path), json_parse_raw(charToRaw(body)))
+  empty <- file.path(dir, "empty.json")
+  file.create(empty)
+  expect_error(json_parse_file(empty), class = "zujson_parse_error")
+  expect_error(json_parse_file(dir), class = "zujson_io_error")
+  expect_error(json_parse_file(file.path(dir, "absent.json")),
+               class = "zujson_arg_error")
+})

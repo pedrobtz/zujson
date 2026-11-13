@@ -4,7 +4,6 @@
 static const R_CallMethodDef CallEntries[] = {
     {"zujson_parse_str",      (DL_FUNC) &zujson_parse_str,      3},
     {"zujson_parse_raw",      (DL_FUNC) &zujson_parse_raw,      3},
-    {"zujson_parse_file",     (DL_FUNC) &zujson_parse_file,     3},
     {"zujson_validate_str",   (DL_FUNC) &zujson_validate_str,   1},
     {"zujson_validate_raw",   (DL_FUNC) &zujson_validate_raw,   1},
     {"zujson_write",          (DL_FUNC) &zujson_write,          4},

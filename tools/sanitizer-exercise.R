@@ -309,6 +309,26 @@ check("long non-ASCII key cut in a message",
                                  strrep("\u00e9", 300)),
                          data_frame = TRUE)) == "condition")
 
+# A string not valid in the encoding it declares is refused, in both
+# directions, by the checked conversion that replaced translateCharUTF8()
+# (#42). The native case needs a non-UTF-8 locale, so the C locale is set and
+# restored by hand, base R only.
+bad_latin <- "\x81\x8d"
+Encoding(bad_latin) <- "latin1"
+check("unconvertible latin1 value", quietly(json_write(bad_latin)) == "condition")
+check("unconvertible latin1 key",
+      quietly(json_write(stats::setNames(list(1), bad_latin))) == "condition")
+old_ctype <- Sys.getlocale("LC_CTYPE")
+Sys.setlocale("LC_CTYPE", "C")
+native <- rawToChar(as.raw(c(0x22, 0x63, 0x61, 0x66, 0xc3, 0xa9, 0x22)))
+check("unconvertible native parse", quietly(json_parse(native)) == "condition")
+check("unconvertible native NDJSON",
+      quietly(json_parse_ndjson(native)) == "condition")
+check("unconvertible native validate", identical(json_validate(native), FALSE))
+check("unconvertible native write",
+      quietly(json_write(list(s = native))) == "condition")
+Sys.setlocale("LC_CTYPE", old_ctype)
+
 cat("-- files ----------------------------------------------------------\n")
 
 path <- tempfile(fileext = ".json")

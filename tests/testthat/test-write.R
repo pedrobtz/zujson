@@ -506,3 +506,32 @@ test_that("a zero-row data frame is charged the one level it writes", {
     class = "zujson_depth_error"
   )
 })
+
+test_that("a string that cannot be converted to UTF-8 is refused, not rewritten", {
+  # Bytes R's latin1 (CP1252) mapping leaves undefined came out as the text
+  # "<81><8d>" in any locale, and an unmarked non-ASCII string under the C
+  # locale as "caf<c3><a9>" (#42).
+  x <- "\x81\x8d"
+  Encoding(x) <- "latin1"
+  expect_error(json_write(x), class = "zujson_write_error")
+  expect_error(json_write(list(a = x)), class = "zujson_write_error")
+  expect_error(json_write(stats::setNames(list(1), x)),
+               class = "zujson_write_error")
+  expect_error(json_write(factor(x)), class = "zujson_write_error")
+  expect_error(json_write_ndjson(list(x)), class = "zujson_write_error")
+  # every byte CP1252 does define still converts
+  ok <- rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xe9, 0x80)))
+  Encoding(ok) <- "latin1"
+  expect_identical(json_write(ok), '"café€"')
+
+  # The C locale is ASCII on Unix, which is the case this pins. Windows maps
+  # it to a code page in which these bytes convert, so it is skipped there.
+  skip_on_os("windows")
+  cafe <- rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xc3, 0xa9)))
+  withr::local_locale(c(LC_CTYPE = "C"))
+  expect_error(json_write(cafe), class = "zujson_write_error")
+  expect_error(json_write_raw(list(name = cafe)), class = "zujson_write_error")
+  marked <- cafe
+  Encoding(marked) <- "UTF-8"
+  expect_identical(json_write_raw(marked), charToRaw('"café"'))
+})

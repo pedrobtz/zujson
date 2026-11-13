@@ -82,8 +82,13 @@ kind. The three modes agree everywhere else, including the promotions
 \code{preserve} keeps the type and gives up the uniform shape, on the view that a
 field which is usually a number and occasionally a string is a bug worth
 seeing. \code{coerce} is the opt-in for callers who would rather have the vector:
-it follows R's own promotion, so the strings are exactly what
-\code{as.character()} produces. A nested object or array is never coerced away.
+the numbers in an array are gathered into one numeric vector and turned to
+strings by \code{as.character()}, \code{true}/\code{false} become \code{"TRUE"}/\code{"FALSE"}, and
+\code{null} stays \code{NA}. Two consequences follow from using \code{as.character()}: the
+strings follow the session's \code{OutDec} and \code{scipen} options, and how one
+number is written depends on the others in the same array -- \verb{[100000,"a"]}
+gives \code{"100000"} but \verb{[100000,1.5,"a"]} gives \code{"1e+05"}. A nested object or
+array is never coerced away.
 }
 
 \section{Data frames}{
@@ -126,6 +131,13 @@ R's own allocation error rather than a \code{zujson_error}.
 
 Nesting deeper than 1000 levels is rejected with a \code{zujson_depth_error},
 which is what makes the parser safe to point at an untrusted response body.
+
+A character \code{x} is read as UTF-8 JSON: text marked UTF-8 or plain ASCII as
+it is, and text in another encoding converted first. Text that is not valid
+in the encoding it declares -- typically a body read with \code{readLines()}
+under the C locale -- raises \code{zujson_parse_error} rather than having its
+bytes rewritten, and \code{json_validate()} returns \code{FALSE} for it. The raw route
+has no such step: pass the bytes as they arrived.
 
 A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
 forbids emitting one but allows ignoring it, and real APIs emit them. The

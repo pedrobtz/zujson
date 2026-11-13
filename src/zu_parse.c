@@ -996,6 +996,7 @@ static SEXP zu_read_ndjson(const char *dat, size_t len, zu_mode mode,
 
         zu_owner_hold(owner, doc);
         /* Errors raised while the record is built name the line too (#54). */
+        zu_err_what = "line";
         zu_err_line = lineno;
         SET_VECTOR_ELT(out, k++, zu_to_sexp(yyjson_doc_get_root(doc), mode, df, 1));
         zu_err_line = 0;

@@ -329,6 +329,16 @@ check("unconvertible native write",
       quietly(json_write(list(s = native))) == "condition")
 Sys.setlocale("LC_CTYPE", old_ctype)
 
+# A message quoting a name with invalid bytes is escaped on the R_alloc stack
+# (#76); the NDJSON writer's record context is set and cleared around each
+# record (#70); a FIFO is read through a raw connection (#66).
+bad_name <- structure(list(a = quote(x)), class = "data.frame", row.names = 1L)
+names(bad_name) <- "c\xffd"
+check("message for an invalid name", quietly(json_write(bad_name)) == "condition")
+check("NDJSON record context",
+      quietly(json_write_ndjson(list(1L, list(sum)))) == "condition")
+check("record context cleared", quietly(json_write(list(1L))) == "ok")
+
 cat("-- files ----------------------------------------------------------\n")
 
 path <- tempfile(fileext = ".json")

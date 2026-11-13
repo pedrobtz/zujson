@@ -77,9 +77,10 @@ static yyjson_mut_val *zu_w_dbl(zu_wctx *ctx, double v) {
 }
 
 /* A name being quoted back inside an error message, where throwing a second
- * condition on the way out of the first would lose the real one. */
+ * condition on the way out of the first would lose the real one. Always valid
+ * UTF-8 (#76). */
 static const char *zu_char_msg(SEXP s) {
-    return Rf_getCharCE(s) == CE_BYTES ? "<bytes>" : Rf_translateCharUTF8(s);
+    return zu_msg_str(s);
 }
 
 /* translateCharUTF8 is a no-op for UTF-8 and ASCII, and converts otherwise.
@@ -379,7 +380,10 @@ static void zu_df_plan_init(SEXP df, zu_df_plan *plan, SEXP keep) {
     R_xlen_t ncol = XLENGTH(df);
     SEXP nms = Rf_getAttrib(df, R_NamesSymbol);
     SET_VECTOR_ELT(keep, ZU_DF_KEEP_NMS, nms);
-    if (!zu_fully_named(nms, ncol))
+    /* A frame with no columns has no names to check: a hand-built one may
+     * carry no names attribute at all, and it is zero objects or n empty
+     * ones either way (#73). */
+    if (ncol > 0 && !zu_fully_named(nms, ncol))
         zu_stop("zujson_unsupported_type",
                 "data frame columns must all be named");
 
@@ -634,9 +638,14 @@ SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_, SEXP as_raw_) {
         zu_owner_hold(owner, doc);
 
         zu_wctx ctx = { doc, auto_unbox, 0 };
+        /* An error while the record is built names it, as the reader names
+         * the line (#70). */
+        zu_err_what = "record";
+        zu_err_line = (unsigned long) (i + 1);
         yyjson_mut_doc_set_root(doc, is_df
             ? zu_df_row(x_, &plan, i, &ctx, 1)
             : zu_from_sexp(VECTOR_ELT(x_, i), &ctx, 1));
+        zu_err_line = 0;
 
         size_t len = 0;
         yyjson_write_err werr;

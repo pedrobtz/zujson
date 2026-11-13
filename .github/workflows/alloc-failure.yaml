@@ -7,9 +7,16 @@
 # and on-demand job rather than a per-pull-request one. With no pull_request
 # trigger it needs no changes gate (ci.md).
 #
-# expect-pattern is R's own allocation error. A run that dies of an injected
-# failure any other way -- a crash, or the exerciser's "WRONG RESULT" -- does
-# not match, and fails the sweep.
+# expect-pattern is what a run that dies of an injected failure may say: R's
+# own allocation error, or the package's -- yyjson's "failed to allocate
+# memory" (reader and writer) and zu_write.c's "out of memory ...". A run that
+# dies any other way -- a crash, or the exerciser's "WRONG RESULT" -- does not
+# match, and fails the sweep.
+#
+# target-pattern is the package's messages alone, and counts the injected
+# failures that actually reached zujson rather than R's own startup or
+# library(): without it a sweep that never touched the package was green (#69).
+# min-target-hits is the floor that makes that count a check.
 #
 # It does not detect leaks: a leaked yyjson document on the unwind path (#52)
 # exits like any other failed run. The sanitizer job's exerciser is where a
@@ -28,5 +35,15 @@ jobs:
     uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@v1
     with:
       run: Rscript tools/alloc-exercise.R
-      expect-pattern: "cannot allocate|memory exhausted"
+      # The floor is measured with the package loaded, so the sweep starts
+      # where the workload does. Measured from an empty Rscript, all 1000
+      # injections of the first run landed in library(zujson) -- R's
+      # find.package(), its regexes and gzfile() -- and none reached zujson.
+      baseline-run: Rscript -e 'invisible(library(zujson))'
+      expect-pattern: "[Cc]annot allocate|memory exhausted|Out of memory|out of virtual memory|failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
+      target-pattern: "failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
+      # R's own regex compiler and gzfile() crash on a failed allocation
+      # themselves; a crash there is R's, not the package's.
+      ignore-crash-pattern: "tre_|gzfile\\(|regcomp|grepl\\(|gsub\\(|strsplit\\("
+      min-target-hits: 1
       max-allocations: 1000

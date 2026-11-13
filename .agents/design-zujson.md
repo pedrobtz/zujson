@@ -1,11 +1,12 @@
 # zujson Design
 
-**Status:** v1 shipped
+**Status:** v1 shipped; growth after v1 planned in [roadmap.md](roadmap.md)
+**Owner:** this package. The RFC in `pedrobtz/packages` is a pointer here.
 **Package:** `zujson`
 **Purpose:** Lightweight JSON parsing and serialization for R, designed for direct reuse by `zuhttp`
 **Implementation:** C with vendored yyjson
 **Target:** CRAN-compatible source package
-**Non-goals:** A `jsonlite` replacement, JSON Pointer/Patch/Schema, custom serializer dispatch
+**Non-goals:** A second default mapping; JSON Schema validation; S3 dispatch on every node when writing; other formats (§16)
 
 ---
 
@@ -17,7 +18,8 @@ narrow API for the two things an HTTP client does with JSON:
 - turn a response body — raw bytes — into R vectors and lists;
 - turn an R object into the UTF-8 bytes of a request body.
 
-Everything else is out of scope for v1. The intended stack:
+Everything else was out of scope for v1, and is added after it only by the
+rule of §16. The intended stack:
 
 ```text
                     zuhttp
@@ -612,12 +614,16 @@ recs  <- json_feed(s, chunk)   # raw chunk in -> completed records out
 recs  <- json_finish(s)        # flush; errors on an incomplete tail
 ```
 
-**It is not built, deliberately.** Its API depends entirely on how `zuhttp`
-hands out chunks — callback, connection, or something else — and `zuhttp` does
-not exist yet. This is the same rule §15 applies to the C API: infrastructure
-for a caller that does not exist gets designed, not built. Guessing wrong here
-means a breaking change to a public object's lifecycle, which is the most
-expensive kind to take back.
+**It was not built in v1, deliberately.** Its API depends on how `zuhttp`
+hands out chunks, and `zuhttp` did not exist. The rule is the one §15 applies
+to the C API: infrastructure for a caller that does not exist gets designed,
+not built. Guessing wrong here means a breaking change to a public object's
+lifecycle, which is the most expensive kind to take back.
+
+That caller now exists (2026-11-13): `zuhttp` is released, imports
+`zujson (>= 0.1.0)`, and hands a callback raw chunks. Its streaming article
+buffers NDJSON lines by hand, which is this object written in R. The stream
+is unblocked, and is roadmap v0.3.0.
 
 Decisions already made, so the implementation is not starting cold:
 
@@ -653,9 +659,11 @@ an unbounded stream.
 6. Every raised condition inherits `zujson_error`. ✅
 7. Untrusted input cannot exhaust the C stack. ✅
 8. Response bytes in and request bytes out with no string detour. ✅
-9. **Used by a real `zuhttp`.** ❌ — open, deliberately: `zuhttp` is still an
-   empty skeleton. The shapes are covered by `test-roundtrip.R`, but the
-   criterion cannot close until there is something to integrate with.
+9. **Used by a real `zuhttp`.** ❌ — open, but no longer blocked: `zuhttp`
+   is released and imports `zujson (>= 0.1.0)`. The shapes are covered by
+   `test-roundtrip.R`; the criterion closes with the integration test of
+   roadmap Stage 2.7, which asserts on the bytes `zuhttp`'s transport
+   received.
 
 ## 15. What comes after v1
 
@@ -666,8 +674,9 @@ Not more of §13.9. In rough order:
   actually ask about;~~ **done**, opt-in via `data_frame = TRUE` (§5, q7).
 - a public C API through `LinkingTo: zujson`, so `zuhttp` can parse from C —
   worth doing only once a caller exists, following `zukomp`'s registered
-  C-callable pattern rather than exporting yyjson types; **still blocked on
-  that caller.**
+  C-callable pattern rather than exporting yyjson types; **unblocked**, and
+  roadmap v0.8.0. It still merges only with a sibling's pull request that
+  calls it.
 - ~~fuzzing and sanitizer CI jobs;~~ **done**: `native-checks.yaml` runs
   `tools/sanitizer-exercise.R` under clang-asan and gcc-asan, UBSan over the
   suite on a runner, and fuzzes the parser through the R API;
@@ -677,8 +686,74 @@ Not more of §13.9. In rough order:
   with the CRAN-like container legs of `R CMD check` that the runner matrix
   cannot reach. `rchk` is informational until the package is at zero
   findings.
-- the streaming object of §13, once `zuhttp` exists to shape its API. **Still
-  blocked on the same thing.**
+- the streaming object of §13, once `zuhttp` exists to shape its API.
+  **Unblocked**, and roadmap v0.3.0.
 
-What remains is exactly the work that cannot start until `zuhttp` is more than
-a skeleton — which is also what acceptance criterion §14.9 is waiting for.
+This list is closed. What comes next is in [roadmap.md](roadmap.md), under
+the rule of §16.
+
+## 16. Growth after v1
+
+v1 kept the surface to what an HTTP client needs. The family now asks for
+more: ten siblings call this package, and several work around something it
+lacks (the roadmap's evidence table). The surface may grow. The mapping may
+not grow with it. One rule holds the two apart:
+
+> **The defaults are the one-page mapping of §5 and §6, and they stop
+> changing at 0.2.0. Everything after is opt-in: a new argument value, or a
+> new function.**
+
+What follows from it:
+
+1. **0.2.0 is the last release that changes what a default call returns.** A
+   mapping change after it is a breaking change for every dependent.
+2. **A new option is a row in a table**, in the roxygen, in this file and in
+   the tests, in one pull request, as the mapping rows are.
+3. **A new option never changes another option's meaning.** Where two
+   interact, the one that wins is stated and both orders are tested.
+4. **§7 and §8 apply to everything new.** Every failure is a `zujson_error`;
+   nothing holds heap state across a longjmp unless R owns it.
+5. **A feature needs an oracle before it needs code**: a conformance suite, a
+   reference implementation or a round trip that knows the answer.
+6. **Scope is JSON text and R values.** Another format, or a domain mapping
+   (GeoJSON, ProtoJSON, JOSE), is another package's. This one supplies the
+   options those packages need.
+
+### Options
+
+Decided, not yet built (roadmap Stage 2.2). The headline arguments stay few
+and positional: `simplify`, `data_frame`, `pretty`, `auto_unbox`. Everything
+else is a field of one object per direction, `json_read_options()` and
+`json_write_options()`, passed as `options =` to every entry point of that
+direction.
+
+- The object is validated once, in R, and reaches C as a flag word and a
+  small struct.
+- Every route takes the same object, so an option cannot exist on
+  `json_parse()` and be missing on `json_parse_ndjson()`.
+- No global option changes a mapping. `zujson.max_df_cells` is a budget, and
+  stays the only one.
+
+Flat arguments, as `jsonlite::toJSON()` has, were rejected: ten entry points
+times thirty arguments is where routes drift apart.
+
+### What moved from the non-goals
+
+- **JSON Pointer and Patch** are planned (roadmap v0.6.0, v0.7.0). yyjson
+  implements both, RFC 6901 and RFC 6902 have public test suites, and they
+  add functions without touching the mapping.
+- **Custom serializer dispatch** stays a non-goal as S3 dispatch on every
+  node. A single `default =` fallback, called only for a value that would
+  otherwise raise `zujson_unsupported_type`, is planned (roadmap Stage 4.6).
+- **JSON Schema validation** stays a non-goal here. A 2020-12 validator is
+  larger than this package and belongs in a sibling built on the C API.
+- **A `jsonlite` replacement** was never the aim and is not now. Parity is
+  measured against what a caller can do, not against `jsonlite`'s defaults:
+  `[1,"a"]` is still a list.
+
+### Long-lived objects
+
+v1 returns nothing that outlives its call. The stream (v0.3.0) and the parsed
+document (v0.8.0) will. Each is owned by a finalized external pointer per §8,
+refuses use after `readRDS()` with a classed error, and gets an Objects row
+in `.agents/assurance.md` in the pull request that exports it.

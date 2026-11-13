@@ -192,56 +192,63 @@ json_parse_raw <- function(x, simplify = TRUE, data_frame = FALSE) {
 #' unlink(path)
 json_parse_file <- function(path, simplify = TRUE, data_frame = FALSE) {
   path <- zu_check_string(path, "path")
-  # Expand here rather than let the C fopen() see a literal "~": file.exists()
-  # expands it and fopen() does not, so without this a readable file reports
-  # itself as unreadable.
+  # Expanded so the "does not exist" message names the file the caller meant;
+  # the open below normalises the path again.
   path <- path.expand(path)
   if (!file.exists(path)) {
     zu_abort("zujson_arg_error", paste0("File '", path, "' does not exist."))
   }
-  # A directory is caught here rather than in C because the C layer cannot
-  # classify it portably: fopen() on a directory fails on macOS and Windows,
-  # so yyjson reports a file-open error, but succeeds on glibc, where the size
-  # it then reads back is absurd and yyjson reports a *memory allocation*
-  # failure instead. That is neither of the codes mapped to `zujson_io_error`,
-  # so the same call raised `zujson_io_error` on two platforms and
-  # `zujson_parse_error` on the third.
+  # A directory is refused by name rather than left to the read, which fails
+  # differently by platform and with a message about connections, not files.
   if (dir.exists(path)) {
     zu_abort("zujson_io_error",
              paste0("could not read '", path, "': it is a directory."))
   }
-  # The bytes are read here and parsed by the raw route. Opening the file in
-  # R means the path is in the encoding R's own file functions use: the C
-  # layer used to open a *translated* copy, which under the C locale was
-  # "c<c3><a9>.json", a file that does not exist (#50). It also makes the file
-  # route the raw route, one reader with one set of error classes.
+  # The bytes are read in R, in the encoding R's own file functions use for a
+  # path, and parsed by the raw route, so the file route and the raw route are
+  # one reader with one set of error classes (#50).
   .Call(C_zujson_parse_raw, zu_read_file(path), zu_check_simplify(simplify),
         zu_check_df(data_frame))
 }
 
-# A file's bytes, in chunks, so a FIFO (whose size is 0) and a file past
-# 2^31 - 1 bytes (past what one readBin() call returns) both read whole.
-# Failing to open or read it is zujson_io_error, warning included: under
-# options(warn = 2) R's "cannot open file" warning is itself an error.
-zu_read_file <- function(path) {
+# A file's bytes, read in chunks of `n`, so a FIFO (whose size is 0) and a file
+# past 2^31 - 1 bytes (more than one readBin() call returns) both read whole.
+#
+# `raw = TRUE` opens the file as bytes: file() otherwise warns before opening
+# a FIFO or pipe, and sniffs for compression. The normalised path cannot be
+# mistaken for one of the descriptions file() treats as a device -- "stdin",
+# "clipboard" -- which read the process's stdin or the clipboard instead of
+# the file of that name (#66).
+#
+# A warning anywhere here is as fatal as an error, on purpose: a read that
+# warns has not delivered bytes to trust, and under options(warn = 2) it would
+# otherwise escape as a bare error.
+zu_read_file <- function(path, n = 16777216L) {
   io_error <- function(e) {
     zu_abort("zujson_io_error",
              paste0("could not read '", path, "': ", conditionMessage(e)))
   }
-  tryCatch({
-    con <- file(path, open = "rb")
-    on.exit(close(con))
-    chunks <- list()
+  con <- tryCatch(
+    file(normalizePath(path, mustWork = TRUE), open = "rb", raw = TRUE),
+    error = io_error, warning = io_error
+  )
+  on.exit(close(con))
+  chunks <- tryCatch({
+    out <- list()
     repeat {
-      chunk <- readBin(con, "raw", n = 16777216L)
+      chunk <- readBin(con, "raw", n = n)
       if (length(chunk) == 0L) break
-      chunks[[length(chunks) + 1L]] <- chunk
+      out[[length(out) + 1L]] <- chunk
     }
-    switch(min(length(chunks), 2L) + 1L,
-           raw(),
-           chunks[[1L]],
-           unlist(chunks, use.names = FALSE))
+    out
   }, error = io_error, warning = io_error)
+  if (length(chunks) == 0L) {
+    raw()
+  } else if (length(chunks) == 1L) {
+    chunks[[1L]]
+  } else {
+    unlist(chunks, use.names = FALSE)
+  }
 }
 
 #' Check whether input is valid JSON

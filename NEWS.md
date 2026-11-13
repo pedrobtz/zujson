@@ -50,6 +50,22 @@
   to open a translated copy of the path, which under the C locale named a
   file that does not exist (#50).
 
+* `json_parse_file()` reads a FIFO or pipe, and a file named `stdin` or
+  `clipboard` reads the file rather than that device (#66).
+
+* Native-encoded strings in a UTF-8 session, the usual output of `rawToChar()`
+  and `readLines()`, are passed to the parser and writer as they are rather
+  than through a conversion, which made `json_write()` about 8x slower on them
+  (#67).
+
+* `json_write_ndjson()` names the record an error comes from (#70).
+
+* A data frame with no columns and no `names` attribute is written as `[]`
+  rather than refused (#73).
+
+* A condition message that quotes a name holding invalid bytes stays valid
+  UTF-8, showing each bad byte as `<xx>` (#76).
+
 * The native memory behind a parse or a write can no longer leak if R fails
   an allocation at the moment it is handed to R. The external pointer that
   owns it is now made before the memory exists (#52).
@@ -74,7 +90,6 @@
 * `json_parse_ndjson()` accepts a UTF-8 byte order mark only at the start of
   the body, and a body that is only a BOM is empty. A BOM at the start of any
   later line was accepted, and a BOM-only first line was an error (#56).
-||||||| a962bb7
 
 # zujson 0.1.0
 

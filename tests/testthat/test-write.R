@@ -291,3 +291,211 @@ test_that("a string that is not the UTF-8 it claims to be is a write error", {
   expect_error(json_write(list(a = bad)), class = "zujson_write_error")
   expect_error(json_write_raw(bad), class = "zujson_error")
 })
+
+test_that("POSIXlt is refused on every writer entry point", {
+  # A data frame column and the NDJSON top level used to skip the guard and
+  # emit the 11 broken-down fields as data -- one field per row (#40).
+  lt <- function(n) {
+    as.POSIXlt(as.POSIXct("2024-01-01", tz = "UTC") + seq_len(n), tz = "UTC")
+  }
+  d11 <- data.frame(id = 1:11)
+  d11$t <- lt(11)
+  d3 <- data.frame(id = 1:3)
+  d3$t <- lt(3)
+  for (d in list(d11, d3)) {
+    expect_error(json_write(d), class = "zujson_unsupported_type")
+    expect_error(json_write_ndjson(d), class = "zujson_unsupported_type")
+    expect_error(json_write(list(d)), class = "zujson_unsupported_type")
+  }
+  expect_error(json_write_ndjson(lt(1)), class = "zujson_unsupported_type")
+  expect_error(json_write_ndjson(lt(11)), class = "zujson_unsupported_type")
+  # the paths that were already guarded stay guarded
+  expect_error(json_write(lt(1)), class = "zujson_unsupported_type")
+  expect_error(json_write(list(a = lt(1))), class = "zujson_unsupported_type")
+  expect_error(
+    json_write_ndjson(list(lt(1))),
+    class = "zujson_unsupported_type"
+  )
+})
+
+test_that("POSIXct just below a day boundary floors to 23:59:59, never 24:00", {
+  # secs - floor(secs / 86400) * 86400 used to round to exactly 86400 for a
+  # value a hair below midnight, printing hour 24 (#41)
+  expect_json(.POSIXct(-1e-12, tz = "UTC"), '"1969-12-31T23:59:59Z"')
+  expect_json(
+    as.POSIXct("1970-01-01", tz = "UTC") + (0.3 - 0.1 - 0.2),
+    '"1969-12-31T23:59:59Z"'
+  )
+  expect_json(.POSIXct(-5e-324, tz = "UTC"), '"1969-12-31T23:59:59Z"')
+  for (k in c(-719527, -2, -1, 0, 1, 19675, 2932896)) {
+    for (eps in c(1e-12, 1e-9, 1e-6, 0.5)) {
+      x <- .POSIXct(k * 86400 - eps, tz = "UTC")
+      want <- format(
+        .POSIXct(floor(unclass(x)), tz = "UTC"),
+        "%Y-%m-%dT%H:%M:%SZ",
+        tz = "UTC"
+      )
+      expect_identical(
+        json_write(x),
+        paste0('"', want, '"'),
+        info = paste("k =", k, "eps =", eps)
+      )
+    }
+  }
+})
+
+test_that("Date and POSIXct agree with format() across four-digit years", {
+  # The oracle is base R's formatter. It is restricted to years 1000-9999,
+  # where every platform's format() zero-pads the same way (#31).
+  withr::local_seed(20261113)
+  lo <- as.numeric(as.Date("1000-01-01"))
+  hi <- as.numeric(as.Date("9999-12-31"))
+  days <- c(lo, hi, 0, -1, 59, 60, 11016, 10957, 47541, sample(lo:hi, 2000))
+  d <- structure(as.double(days), class = "Date")
+  expect_identical(json_parse(json_write(I(d))), format(d, "%Y-%m-%d"))
+
+  secs <- c(
+    lo * 86400,
+    hi * 86400 + 86399,
+    -1,
+    0,
+    stats::runif(2000, lo * 86400, hi * 86400 + 86399)
+  )
+  p <- .POSIXct(secs, tz = "UTC")
+  want <- format(
+    .POSIXct(floor(secs), tz = "UTC"),
+    "%Y-%m-%dT%H:%M:%SZ",
+    tz = "UTC"
+  )
+  expect_identical(json_parse(json_write(I(p))), want)
+})
+
+test_that("whole doubles are integer text exactly on [-2^63, 2^63)", {
+  # -2^63 is inclusive and 2^63 exclusive: the conversion to int64 is
+  # undefined just past either end, so both edges are pinned (#36)
+  expect_json(-2^63, "-9223372036854775808")
+  expect_json(2^63 - 1024, "9223372036854774784")
+  for (v in c(2^63, -2^63 - 2048)) {
+    out <- json_write(v)
+    expect_match(out, "[.eE]")
+    expect_identical(as.numeric(json_parse(out)), v)
+  }
+})
+
+test_that("POSIXct is straddled at the lower end of the range too", {
+  expect_json(.POSIXct(-62167219200, tz = "UTC"), '"0000-01-01T00:00:00Z"')
+  expect_json(.POSIXct(-62167219199.5, tz = "UTC"), '"0000-01-01T00:00:00Z"')
+  # half a second earlier floors into the year -1
+  expect_error(
+    json_write(.POSIXct(-62167219200.5, tz = "UTC")),
+    class = "zujson_write_error"
+  )
+  expect_error(
+    json_write(.POSIXct(-62167219201, tz = "UTC")),
+    class = "zujson_write_error"
+  )
+})
+
+test_that("a classed vector with the wrong storage type is a classed error", {
+  # The kind was chosen from the class alone, so these reached R's checked
+  # accessors and raised a bare simpleError (#43).
+  expect_json(structure(NA, class = "Date"), "null")
+  expect_json(structure(c(NA, NA), class = "Date"), "[null,null]")
+  expect_json(structure(NA, class = c("POSIXct", "POSIXt")), "null")
+  expect_json(
+    structure(1L, class = c("POSIXct", "POSIXt")),
+    '"1970-01-01T00:00:01Z"'
+  )
+
+  bad <- list(
+    structure("x", class = "Date"),
+    structure(TRUE, class = "Date"),
+    structure(1i, class = "Date"),
+    structure(list(1), class = "Date"),
+    structure("x", class = c("POSIXct", "POSIXt")),
+    structure(c(TRUE, NA), class = c("POSIXct", "POSIXt")),
+    structure(1:2, levels = 1:2, class = "factor"),
+    structure(1L, levels = list("a"), class = "factor"),
+    structure(1L, class = "integer64"),
+    structure(list(a = NULL), class = "data.frame"),
+    structure(list(a = sum), class = "data.frame", row.names = 1L),
+    structure(1:3, names = c("a", "b", "c"), class = "data.frame")
+  )
+  for (i in seq_along(bad)) {
+    x <- bad[[i]]
+    expect_error(
+      json_write(x),
+      class = "zujson_unsupported_type",
+      info = paste("case", i)
+    )
+    expect_error(
+      json_write(list(x)),
+      class = "zujson_unsupported_type",
+      info = paste("case", i)
+    )
+    expect_error(
+      json_write_ndjson(list(x)),
+      class = "zujson_unsupported_type",
+      info = paste("case", i)
+    )
+  }
+
+  # the same values as data frame columns, through both writers
+  cols <- list(
+    structure(c(NA, "x"), class = "Date"),
+    structure(c(1L, 2L), levels = 1:2, class = "factor")
+  )
+  for (col in cols) {
+    d <- structure(
+      list(id = 1:2, v = col),
+      class = "data.frame",
+      row.names = 1:2
+    )
+    expect_error(json_write(d), class = "zujson_unsupported_type")
+    expect_error(json_write_ndjson(d), class = "zujson_unsupported_type")
+  }
+
+  # a frame with no columns and no row.names is zero rows, not an error
+  expect_json(
+    structure(list(), names = character(0), class = "data.frame"),
+    "[]"
+  )
+})
+
+test_that("integer64 is written as the integers it holds", {
+  # bit64 keeps the int64 bits in a double, so falling through to the double
+  # wrote 1 as 5e-324 (#48). Built without bit64 by as_int64().
+  x <- as_int64(c(1L, 2L, -1L, 0L, 0L), c(0L, 0L, -1L, 256L, 0L))
+  expect_json(I(x), "[1,2,-1,1099511627776,0]")
+  expect_json(as_int64(1L), "1")
+  expect_json(as_int64(-1L, 2147483647L), "9223372036854775807")
+  expect_json(as_int64(1L, NA_integer_), "-9223372036854775807")
+  # INT64_MIN is bit64's NA
+  expect_json(as_int64(c(5L, 0L), c(0L, NA)), "[5,null]")
+  # as a column, an object member and an NDJSON record
+  d <- data.frame(id = 1:2)
+  d$big <- as_int64(c(0L, 1L), c(256L, 0L))
+  expect_json(d, '[{"id":1,"big":1099511627776},{"id":2,"big":1}]')
+  expect_identical(
+    json_write_ndjson(d),
+    '{"id":1,"big":1099511627776}\n{"id":2,"big":1}\n'
+  )
+  expect_json(list(n = as_int64(7L)), '{"n":7}')
+})
+
+test_that("a zero-row data frame is charged the one level it writes", {
+  # It emits only the array, so charging it a row level as well refused JSON
+  # json_parse() reads at the limit (#57).
+  limit <- zujson_info()$max_depth
+  df0 <- data.frame(a = integer(0))
+  at <- json_write(wrap_list(df0, limit - 1L))
+  expect_no_error(json_parse(at))
+  expect_error(json_write(wrap_list(df0, limit)), class = "zujson_depth_error")
+  # with rows it is still charged two
+  df1 <- data.frame(a = 1L)
+  expect_no_error(json_parse(json_write(wrap_list(df1, limit - 2L))))
+  expect_error(
+    json_write(wrap_list(df1, limit - 1L)),
+    class = "zujson_depth_error"
+  )
+})

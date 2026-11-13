@@ -18,6 +18,7 @@
 #' | `factor` | its level, as a string |
 #' | `Date` | `"YYYY-MM-DD"` |
 #' | `POSIXct` | `"YYYY-MM-DDTHH:MM:SSZ"`, in UTC |
+#' | `bit64::integer64` | the integers it holds |
 #' | `data.frame` | array of one object per row |
 #' | `list()` | `[]` |
 #' | `structure(list(), names = character())` | `{}` |
@@ -37,7 +38,14 @@
 #' sub-second parts are dropped. Both are doubles in R and so reach much
 #' further than a timestamp can be written: outside `0000-01-01` to
 #' `9999-12-31`, the four-digit years ISO 8601 allows, they raise a
-#' `zujson_write_error` rather than print a year no API can parse.
+#' `zujson_write_error` rather than print a year no API can parse. A `Date` or
+#' `POSIXct` that is all `NA` but stored as logical, which is how
+#' `structure(NA, class = "Date")` comes out, is written as `null`; one stored
+#' as anything else that is not a number raises `zujson_unsupported_type`.
+#'
+#' An `integer64` from bit64 is written as the 64-bit integers it holds, with
+#' its `NA` as `null`. Its values live in the bits of a double, so writing the
+#' double would send `1` as `5e-324`. bit64 itself is not needed to write one.
 #'
 #' A string whose `Encoding()` is `"bytes"` also raises a `zujson_write_error`.
 #' That marking is R saying it does not know the encoding, and JSON text is
@@ -51,8 +59,11 @@
 #'
 #' Complex vectors, raw vectors, functions, environments and `POSIXlt` have no
 #' sensible JSON form and raise a `zujson_unsupported_type` error rather than
-#' being guessed at. (`POSIXlt` is a list of 11 broken-down time fields; convert
-#' it with `as.POSIXct()` first.) A vector carrying an unrecognised class is
+#' being guessed at, wherever they appear: as a value, a list element, a data
+#' frame column or an NDJSON record. (`POSIXlt` is a list of 11 broken-down
+#' time fields; convert it with `as.POSIXct()` first.) So does a classed
+#' vector whose storage the class cannot mean, such as a factor whose levels
+#' are not character. A vector carrying an unrecognised class is
 #' written as its underlying type, which for a matrix means its values in
 #' column-major order with `dim` dropped — matrices are not turned into nested
 #' arrays in this version.

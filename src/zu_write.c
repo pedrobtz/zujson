@@ -447,6 +447,7 @@ static yyjson_mut_val *zu_from_sexp(SEXP x, zu_wctx *ctx, int depth) {
 /* ---- entry point --------------------------------------------------------- */
 
 SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
+    zu_err_line = 0;
     int pretty = Rf_asLogical(pretty_);
     int as_raw = Rf_asLogical(as_raw_);
 
@@ -500,6 +501,7 @@ SEXP zujson_write(SEXP x_, SEXP pretty_, SEXP auto_unbox_, SEXP as_raw_) {
  * a pretty-printed NDJSON stream is a corrupt one, not a nicer one.
  * ------------------------------------------------------------------------- */
 SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_) {
+    zu_err_line = 0;
     int auto_unbox = Rf_asLogical(auto_unbox_);
     int is_df = Rf_inherits(x_, "data.frame");
 

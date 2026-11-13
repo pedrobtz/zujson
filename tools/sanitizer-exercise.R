@@ -249,6 +249,36 @@ check("wide frame refused with the key index at its tightest",
       quietly(json_parse(wide, data_frame = TRUE)) == "condition")
 options(opts)
 
+cat("-- budget per document, line context, big numbers -----------------\n")
+
+# The cell budget is charged across frames (#45), so the second frame is
+# refused after the first is built and its key index is live. The NDJSON
+# errors are raised while a record's document is live, with the line context
+# set (#54), and the BOM refusal on a later line comes from the reader (#56).
+# Big integers are copied onto the R_alloc stack to be re-read (#46).
+opts <- options(zujson.max_df_cells = 4)
+check("second frame over the document's budget",
+      quietly(json_parse('[[{"a":1,"b":2},{"a":3,"b":4}],[{"c":1}]]',
+                         data_frame = TRUE)) == "condition")
+check("NDJSON frames over one body's budget",
+      quietly(json_parse_ndjson('[{"a":1,"b":2},{"a":3,"b":4}]\n[{"c":1}]\n',
+                                data_frame = TRUE)) == "condition")
+options(opts)
+check("NDJSON NUL on line 3",
+      quietly(json_parse_ndjson('1\n2\n"\\u0000"\n')) == "condition")
+check("NDJSON duplicate key on line 2",
+      quietly(json_parse_ndjson('1\n[{"k":1,"k":2}]\n',
+                                data_frame = TRUE)) == "condition")
+check("NDJSON BOM on line 2",
+      quietly(json_parse_ndjson("1\n\xef\xbb\xbf2\n")) == "condition")
+check("big integers",
+      quietly(json_parse(paste0("[", strrep("9", 400), ",",
+                                strrep("1", 25), ",1e400]"))) == "ok")
+check("long non-ASCII key cut in a message",
+      quietly(json_parse(sprintf('[{"%s":1,"%1$s":2}]',
+                                 strrep("\u00e9", 300)),
+                         data_frame = TRUE)) == "condition")
+
 cat("-- files ----------------------------------------------------------\n")
 
 path <- tempfile(fileext = ".json")

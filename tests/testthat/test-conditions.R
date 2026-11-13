@@ -44,3 +44,24 @@ test_that("an error leaves nothing behind that breaks the next call", {
   gc()
   expect_identical(json_parse('{"a": 1}'), list(a = 1L))
 })
+
+test_that("condition messages are valid UTF-8 however they are cut", {
+  # A key cut at 64 bytes, or a message at 512, could end mid-character, and
+  # the message was not marked UTF-8 (#53).
+  key <- paste0("a", strrep("\u00e9", 40))
+  cnd <- tryCatch(
+    json_parse(sprintf('[{"%s":1,"%s":2}]', key, key), data_frame = TRUE),
+    zujson_error = function(e) e
+  )
+  expect_s3_class(cnd, "zujson_parse_error")
+  expect_true(validUTF8(conditionMessage(cnd)))
+  expect_no_error(nchar(conditionMessage(cnd)))
+
+  long <- strrep("\u00e9", 300)
+  d <- structure(list(1:2, 1:3), names = c("a", long), class = "data.frame",
+                 row.names = 1:2)
+  cnd <- tryCatch(json_write(d), zujson_error = function(e) e)
+  expect_s3_class(cnd, "zujson_unsupported_type")
+  expect_true(validUTF8(conditionMessage(cnd)))
+  expect_identical(Encoding(conditionMessage(cnd)), "UTF-8")
+})

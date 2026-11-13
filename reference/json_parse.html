@@ -101,8 +101,8 @@ and differ only in where the bytes come from.</p>
 when every element agrees on a type and a list otherwise:</p><table class="table table"><tr><td>JSON</td><td>R</td></tr><tr><td><code>{"a": 1}</code></td><td>named <code>list</code></td></tr><tr><td><code>[1, 2, 3]</code></td><td><code>integer</code></td></tr><tr><td><code>[1, 2.5]</code></td><td><code>double</code></td></tr><tr><td><code>[true, false]</code></td><td><code>logical</code></td></tr><tr><td><code>["a", "b"]</code></td><td><code>character</code></td></tr><tr><td><code>[1, "a"]</code></td><td><code>list</code> (no common type without coercing)</td></tr><tr><td><code>[1, {}]</code></td><td><code>list</code> (nested container)</td></tr><tr><td><code>[]</code>, <code>[null, null]</code></td><td><code>logical</code></td></tr><tr><td><code>null</code></td><td><code>NULL</code></td></tr></table><p>Numbers become <code>integer</code> when they fit in R's 32-bit integer and <code>double</code>
 otherwise. A number too large for any finite <code>double</code> becomes <code>Inf</code> rather
 than an error: RFC 8259 sets no limit on the magnitude of a number, so
-<code>1e309</code> is valid JSON, and the value is the one <code><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric()</a></code> gives the
-same token. A <code>null</code> inside an array being simplified becomes <code>NA</code>; a <code>null</code>
+<code>1e309</code> is valid JSON. An integer too wide for 64 bits becomes the nearest
+<code>double</code>, the same one the token spelled with <code>.0</code> gives. A <code>null</code> inside an array being simplified becomes <code>NA</code>; a <code>null</code>
 anywhere else becomes <code>NULL</code>. Strings arrive as UTF-8.</p>
     </div>
     <div class="section level2">
@@ -138,10 +138,13 @@ union of the keys rather than by the length of the body: records that share
 no keys at all would ask for one cell per record <em>per record</em>, and no limit
 on the size of the body can stand in for a limit on that, because the growth
 is quadratic in it. More than <code>zujson_info()$max_df_cells</code> cells raises
-<code>zujson_limit_error</code>. The default is 50 million – clear of any real tabular
+<code>zujson_limit_error</code>. The limit is for the whole document, not for each frame:
+every data frame in it, nested or side by side, draws on one budget, and
+<code><a href="json_parse_ndjson.html">json_parse_ndjson()</a></code> counts one body as one document. The default is 50 million – clear of any real tabular
 response, and far below what a hostile one reaches – and
 <code>options(zujson.max_df_cells = )</code> changes it for the session.
-<code>zujson_info()$max_df_cells</code> reports the limit in force.</p>
+<code>zujson_info()$max_df_cells</code> reports the limit in force, as a whole number
+of cells.</p>
 <p>Setting it larger than any frame that could be built switches the check off;
 the option is clamped to what an <code>R_xlen_t</code> holds, which is what
 <code>zujson_info()$max_df_cells</code> then reports. Switched off, nothing bounds the

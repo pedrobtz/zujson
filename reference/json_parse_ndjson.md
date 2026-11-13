@@ -66,9 +66,11 @@ however uniform the records are — records are independent documents, and
 an NDJSON body is not a table.
 
 Blank lines are skipped rather than treated as records, and `\r\n` line
-endings are accepted. A parse failure reports the **line number**,
-because "invalid JSON at byte 41827" is not useful in a body of 10,000
-records.
+endings are accepted. Every error reports the **line number** – a record
+that is not JSON, and one that is but cannot become an R value, such as
+one nested too deep – because "invalid JSON at byte 41827" is not useful
+in a body of 10,000 records. A UTF-8 byte order mark is ignored at the
+start of the body and refused anywhere else.
 
 ## Why line framing is safe
 

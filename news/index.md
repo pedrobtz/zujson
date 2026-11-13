@@ -29,12 +29,52 @@
   [`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
   reads back ([\#57](https://github.com/pedrobtz/zujson/issues/57)).
 
+- `data_frame = TRUE` no longer slows to quadratic time on keys chosen
+  to collide in its index. The key hash is now seeded per call and fully
+  mixed; 2^15 colliding keys took 5.7 s, against 0.014 s for ordinary
+  ones, and could not be interrupted until the end
+  ([\#44](https://github.com/pedrobtz/zujson/issues/44)).
+
+- An integer too wide for 64 bits parses to the nearest `double`. About
+  1 in 1000 came back one unit in the last place off, and differently
+  from the same number written with `.0`
+  ([\#46](https://github.com/pedrobtz/zujson/issues/46)).
+
+- Every
+  [`json_parse_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+  error names its line, including those raised while building a record:
+  an embedded NUL, nesting too deep, a duplicate key in a data frame
+  record, the cell limit
+  ([\#54](https://github.com/pedrobtz/zujson/issues/54)).
+
+- Condition messages are valid UTF-8 and marked as such. A long
+  non-ASCII key or column name could be cut mid-character
+  ([\#53](https://github.com/pedrobtz/zujson/issues/53)).
+
+- `zujson_info()$max_df_cells` reports a fractional option as the whole
+  number of cells the parser enforces
+  ([\#55](https://github.com/pedrobtz/zujson/issues/55)).
+
 ### Behaviour changes
 
 - `bit64::integer64` vectors are written as the 64-bit integers they
   hold, with `NA` as `null`. They used to fall through to their storage
   type and be written as the doubles their bits spell, so `1` went out
   as `5e-324` ([\#48](https://github.com/pedrobtz/zujson/issues/48)).
+
+- The data frame cell limit, `zujson_info()$max_df_cells`, now bounds
+  the whole document rather than each frame in it, as
+  [`?json_parse`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+  describes it. Many frames each under the limit used to be accepted
+  together, however far past it their total went
+  ([\#45](https://github.com/pedrobtz/zujson/issues/45)).
+
+- [`json_parse_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+  accepts a UTF-8 byte order mark only at the start of the body, and a
+  body that is only a BOM is empty. A BOM at the start of any later line
+  was accepted, and a BOM-only first line was an error
+  ([\#56](https://github.com/pedrobtz/zujson/issues/56)). \|\|\|\|\|\|\|
+  a962bb7
 
 ## zujson 0.1.0
 

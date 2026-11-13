@@ -1,0 +1,12 @@
+--- zu_cond.c	2026-11-12 11:10:47
++++ /private/tmp/claude-501/-Users-pbtz-src-github-com-pedrobtz-zujson/9d8fe22c-5204-4620-9ce4-e537ce57bd23/scratchpad/hunt/hunt-3/inj/zujson/src/zu_cond.c	2026-11-13 17:59:10
+@@ -66,6 +66,9 @@
+ 
+ static SEXP zu_own(void *p, zu_own_kind kind) {
+     SEXP tag = PROTECT(Rf_ScalarInteger((int) kind));
++    /* INJECTED (hunt-3): stands in for R_MakeExternalPtr()/Rf_ScalarInteger()
++     * failing to allocate, which longjmps exactly like this. */
++    { const char *f = getenv("ZU_FAIL_OWN"); if (f && atoi(f) == (int) kind) Rf_error("injected: allocation failed in zu_own(kind %d)", (int) kind); }
+     SEXP xp = PROTECT(R_MakeExternalPtr(p, tag, R_NilValue));
+     R_RegisterCFinalizerEx(xp, zu_free_payload, TRUE);  /* TRUE = run at exit */
+     UNPROTECT(2);

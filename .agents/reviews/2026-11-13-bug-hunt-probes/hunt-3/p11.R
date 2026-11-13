@@ -1,0 +1,12 @@
+source("pre.R")
+cat("locale:", Sys.getlocale("LC_CTYPE"), "\n")
+u8 <- "café"; try_(charToRaw(json_write(u8)))
+# realistic: UTF-8 bytes read from a file with no encoding declared, in a C-locale container
+f <- tempfile(); writeBin(charToRaw("café"), f); s <- readLines(f, warn = FALSE); cat("Encoding(s) =", Encoding(s), "\n")
+out <- json_write_raw(list(name = s)); cat(rawToChar(out), "\n"); print(out)
+cat("validates as JSON:", json_validate(out), "\n")
+r <- tryCatch(json_write(structure(list(a=1:2, b=1:3), names=c("a", "café"), class="data.frame")), error=function(e) e)
+m <- conditionMessage(r); cat("msg Encoding:", Encoding(m), " validUTF8:", validUTF8(m), " bytes:", paste(charToRaw(m)[9:16], collapse=" "), "\n")
+long <- paste(rep("é", 300), collapse="")
+r <- tryCatch(json_write(structure(list(a=1:2, b=1:3), names=c("a", long), class="data.frame")), error=function(e) e)
+m <- conditionMessage(r); cat("long-name msg: nbytes", nchar(m, "bytes"), "validUTF8:", validUTF8(m), "class:", class(r)[1], "\n")

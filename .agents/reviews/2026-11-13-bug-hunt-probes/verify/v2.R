@@ -1,0 +1,6 @@
+.libPaths(c(Sys.getenv("WLIB"), .libPaths())); library(zujson)
+t <- function(e) tryCatch(e, error = function(c) paste0("ERR[", class(c)[1], "] ", conditionMessage(c)))
+d <- tempfile(); dir.create(d); p <- file.path(d, rawToChar(as.raw(c(0x63,0xc3,0xa9,0x2e,0x6a,0x73,0x6f,0x6e)))); writeBin(charToRaw('{"a":1}'), p)
+cat("F2 locale:", Sys.getlocale("LC_CTYPE"), " exists:", file.exists(p), " parse_file:", t(json_parse_file(p)), "\n")
+b <- tempfile(); writeBin(as.raw(c(0x7b,0x22,0x6e,0x22,0x3a,0x22,0x63,0x61,0x66,0xc3,0xa9,0x22,0x7d)), b)
+x <- readLines(b, warn=FALSE); cat("F4 enc:", Encoding(x), " char:", t(json_parse(x)$n), " raw:", t(json_parse_raw(readBin(b,"raw",100))$n), " nchar raw route:", nchar(json_parse_raw(readBin(b,"raw",100))$n), " nchar char route:", nchar(json_parse(x)$n), "\n")

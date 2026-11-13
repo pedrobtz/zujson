@@ -82,7 +82,9 @@ direction needs no conversion step.</p>
 <table class="table table"><tr><td>R</td><td>JSON</td></tr><tr><td><code>NULL</code></td><td><code>null</code></td></tr><tr><td><code>NA</code>, <code>NaN</code>, <code>Inf</code></td><td><code>null</code></td></tr><tr><td><code>list(a = 1, b = 2)</code></td><td><code>{"a":1,"b":2}</code></td></tr><tr><td><code>list(1, 2)</code></td><td><code>[1,2]</code></td></tr><tr><td><code>c(a = 1, b = 2)</code></td><td><code>{"a":1,"b":2}</code></td></tr><tr><td><code>1:3</code></td><td><code>[1,2,3]</code></td></tr><tr><td><code>"a"</code></td><td><code>"a"</code> (see <code>auto_unbox</code>)</td></tr><tr><td><code>I("a")</code></td><td><code>["a"]</code></td></tr><tr><td><code>factor</code></td><td>its level, as a string</td></tr><tr><td><code>Date</code></td><td><code>"YYYY-MM-DD"</code></td></tr><tr><td><code>POSIXct</code></td><td><code>"YYYY-MM-DDTHH:MM:SSZ"</code>, in UTC</td></tr><tr><td><code>bit64::integer64</code></td><td>the integers it holds</td></tr><tr><td><code>data.frame</code></td><td>array of one object per row</td></tr><tr><td><code><a href="https://rdrr.io/r/base/list.html" class="external-link">list()</a></code></td><td><code>[]</code></td></tr><tr><td><code>structure(list(), names = character())</code></td><td><code><a href="https://rdrr.io/r/base/Paren.html" class="external-link">{}</a></code></td></tr></table><p>A vector or list becomes a JSON <strong>object</strong> when every element is named, and
 an <strong>array</strong> otherwise. Partial names would produce keys like <code>""</code>, which is
 valid JSON but almost never intended, so a partially named vector is written
-as an array and its names are dropped.</p>
+as an array and its names are dropped. That includes a JSON object with an
+empty key, <code>{"":1}</code>: it parses to a list named <code>""</code>, which is written back
+as an array, <code>[1]</code>.</p>
 <p>Data frames are written row-oriented, because that is what an HTTP API means
 by a table. To get the column-oriented form instead, strip the class first:
 <code>json_write(as.list(df))</code>.</p>
@@ -102,7 +104,9 @@ double would send <code>1</code> as <code>5e-324</code>. bit64 itself is not nee
 <p>A string whose <code><a href="https://rdrr.io/r/base/Encoding.html" class="external-link">Encoding()</a></code> is <code>"bytes"</code> also raises a <code>zujson_write_error</code>.
 That marking is R saying it does not know the encoding, and JSON text is
 UTF-8 by definition, so there is nothing to convert from. Every other
-encoding R tracks is converted on the way out.</p>
+encoding R tracks is converted on the way out, and a string that is not
+valid in the encoding it declares raises <code>zujson_write_error</code> rather than
+being written with its bytes rewritten.</p>
 <p>Doubles are written compactly and always read back as the same number, so
 <code>0.1</code> is <code>0.1</code> rather than <code>0.10000000000000001</code>. A double that is a whole
 number is written without a decimal point at all — R has no integer literal,

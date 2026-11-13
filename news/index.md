@@ -65,12 +65,33 @@
   builds its bytes directly rather than from that string, so it has no
   such ceiling ([\#47](https://github.com/pedrobtz/zujson/issues/47)).
 
+- [`json_parse_file()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+  reads a file with a non-ASCII name in any locale. It now reads the
+  bytes in R and parses them by the raw route; the C layer used to open
+  a translated copy of the path, which under the C locale named a file
+  that does not exist
+  ([\#50](https://github.com/pedrobtz/zujson/issues/50)).
+
 - The native memory behind a parse or a write can no longer leak if R
   fails an allocation at the moment it is handed to R. The external
   pointer that owns it is now made before the memory exists
   ([\#52](https://github.com/pedrobtz/zujson/issues/52)).
 
 ### Behaviour changes
+
+- A string that is not valid in the encoding it declares raises
+  `zujson_parse_error` in
+  [`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+  and
+  [`json_parse_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md),
+  and `zujson_write_error` in the writers, and
+  [`json_validate()`](https://pedrobtz.github.io/zujson/reference/json_validate.md)
+  returns `FALSE` for it. R’s conversion used to rewrite such bytes as
+  text, so a body read with
+  [`readLines()`](https://rdrr.io/r/base/readLines.html) under the C
+  locale came back as `"caf<c3><a9>"`, and `"<81>"` was sent for a
+  latin1 byte with no character
+  ([\#42](https://github.com/pedrobtz/zujson/issues/42)).
 
 - `bit64::integer64` vectors are written as the 64-bit integers they
   hold, with `NA` as `null`. They used to fall through to their storage

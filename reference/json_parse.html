@@ -112,8 +112,13 @@ kind. The three modes agree everywhere else, including the promotions
 <em>within</em> the numeric family (<code>[true, 1]</code> is <code>c(1L, 1L)</code> in all of them):</p><table class="table table"><tr><td>mode</td><td><code>[1, "a"]</code> becomes</td></tr><tr><td><code>"preserve"</code>, or <code>TRUE</code> (default)</td><td><code>list(1L, "a")</code></td></tr><tr><td><code>"coerce"</code></td><td><code>c("1", "a")</code></td></tr><tr><td><code>"none"</code>, or <code>FALSE</code></td><td><code>list(1L, "a")</code>, and every other array is a list too</td></tr></table><p><code>preserve</code> keeps the type and gives up the uniform shape, on the view that a
 field which is usually a number and occasionally a string is a bug worth
 seeing. <code>coerce</code> is the opt-in for callers who would rather have the vector:
-it follows R's own promotion, so the strings are exactly what
-<code><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character()</a></code> produces. A nested object or array is never coerced away.</p>
+the numbers in an array are gathered into one numeric vector and turned to
+strings by <code><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character()</a></code>, <code>true</code>/<code>false</code> become <code>"TRUE"</code>/<code>"FALSE"</code>, and
+<code>null</code> stays <code>NA</code>. Two consequences follow from using <code><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character()</a></code>: the
+strings follow the session's <code>OutDec</code> and <code>scipen</code> options, and how one
+number is written depends on the others in the same array – <code>[100000,"a"]</code>
+gives <code>"100000"</code> but <code>[100000,1.5,"a"]</code> gives <code>"1e+05"</code>. A nested object or
+array is never coerced away.</p>
     </div>
     <div class="section level2">
     <h2 id="data-frames">Data frames<a class="anchor" aria-label="anchor" href="#data-frames"></a></h2>
@@ -152,6 +157,12 @@ allocation but the machine, and a body large enough to exhaust memory raises
 R's own allocation error rather than a <code>zujson_error</code>.</p>
 <p>Nesting deeper than 1000 levels is rejected with a <code>zujson_depth_error</code>,
 which is what makes the parser safe to point at an untrusted response body.</p>
+<p>A character <code>x</code> is read as UTF-8 JSON: text marked UTF-8 or plain ASCII as
+it is, and text in another encoding converted first. Text that is not valid
+in the encoding it declares – typically a body read with <code><a href="https://rdrr.io/r/base/readLines.html" class="external-link">readLines()</a></code>
+under the C locale – raises <code>zujson_parse_error</code> rather than having its
+bytes rewritten, and <code><a href="json_validate.html">json_validate()</a></code> returns <code>FALSE</code> for it. The raw route
+has no such step: pass the bytes as they arrived.</p>
 <p>A leading UTF-8 byte order mark is ignored rather than rejected: RFC 8259
 forbids emitting one but allows ignoring it, and real APIs emit them. The
 bare literals <code>Infinity</code>, <code>-Infinity</code> and <code>NaN</code> are not JSON and stay

@@ -119,9 +119,9 @@ jobs:
 
   # gcc -fanalyzer over the first-party C. src/vendor is yyjson verbatim and
   # never edited here, so its findings are reported under their own heading
-  # but not gated on. Reporting only for now, as rchk was at first: the gate
-  # goes on once a first run has been read and the first-party sources are at
-  # zero (#25).
+  # but not gated on. Blocking from the start: the first run (gcc 16,
+  # 2026-11-13) found 0 in the first-party sources and 6 in src/vendor, so the
+  # next first-party finding is a regression, the same reasoning as rchk (#25).
   analyzers:
     if: >-
       github.event_name != 'pull_request'
@@ -131,6 +131,7 @@ jobs:
         || contains(github.event.pull_request.labels.*.name, 'skip-ci:analyzers'))
     uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@v1
     with:
+      fail-on-findings: true
       exclude: |
         src/vendor
 

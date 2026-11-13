@@ -176,6 +176,26 @@ test_that("NDJSON refuses the same data frames json_write() refuses", {
   expect_error(json_write_ndjson(bad), class = "zujson_unsupported_type")
 })
 
+test_that("the NDJSON body is joined in C, and the raw form never via a string", {
+  # paste() raised a bare error past 2^31 - 1 bytes and the raw variant was
+  # charToRaw() of that string (#47). What is checked here is that the two
+  # forms are the same bytes, framed exactly, at the sizes the suite can
+  # afford; the INT_MAX edge itself needs gigabytes (#37).
+  recs <- list(list(a = 1L), "café", NULL, list(b = list(1, 2)))
+  s <- json_write_ndjson(recs)
+  r <- json_write_ndjson_raw(recs)
+  expect_identical(s, '{"a":1}\n"café"\nnull\n{"b":[1,2]}\n')
+  expect_identical(Encoding(s), "UTF-8")
+  expect_identical(r, charToRaw(s))
+  expect_identical(json_write_ndjson(list()), "")
+  expect_identical(json_write_ndjson_raw(list()), raw())
+  expect_identical(json_write_ndjson_raw(data.frame(a = 1:2)),
+                   charToRaw('{"a":1}\n{"a":2}\n'))
+  big <- lapply(seq_len(5000), function(i) list(i = i, s = strrep("x", 50)))
+  expect_identical(json_write_ndjson_raw(big), charToRaw(json_write_ndjson(big)))
+  expect_length(strsplit(json_write_ndjson(big), "\n", fixed = TRUE)[[1]], 5000L)
+})
+
 test_that("every NDJSON error names its line", {
   # Errors raised while building a record, not reading it, named no line
   # (#54). Each is on line 3.

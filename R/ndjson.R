@@ -68,13 +68,10 @@ json_parse_ndjson <- function(x, simplify = TRUE, data_frame = FALSE) {
 #' @rdname json_parse_ndjson
 #' @export
 json_write_ndjson <- function(x, auto_unbox = TRUE) {
-  lines <- .Call(C_zujson_write_lines, x, zu_check_flag(auto_unbox, "auto_unbox"))
-  if (length(lines) == 0L) {
-    return("")
-  }
-  # paste() keeps the UTF-8 mark the records already carry, so the bytes are
-  # not re-encoded on the way out.
-  paste0(paste(lines, collapse = "\n"), "\n")
+  # The records are joined in C, so a body past 2^31 - 1 bytes is a
+  # zujson_write_error naming json_write_ndjson_raw() rather than paste()'s
+  # bare error (#47).
+  .Call(C_zujson_write_lines, x, zu_check_flag(auto_unbox, "auto_unbox"), FALSE)
 }
 
 #' @rdname json_parse_ndjson
@@ -84,9 +81,7 @@ json_write_ndjson <- function(x, auto_unbox = TRUE) {
 #' # bytes, ready to be an HTTP request body
 #' json_write_ndjson_raw(list(list(a = 1L), list(a = 2L)))
 json_write_ndjson_raw <- function(x, auto_unbox = TRUE) {
-  out <- json_write_ndjson(x, auto_unbox = auto_unbox)
-  if (!nzchar(out)) {
-    return(raw())
-  }
-  charToRaw(out)
+  # Built as bytes directly, never through a string: CLAUDE.md, "do not let
+  # either direction acquire a mandatory string detour" (#47).
+  .Call(C_zujson_write_lines, x, zu_check_flag(auto_unbox, "auto_unbox"), TRUE)
 }

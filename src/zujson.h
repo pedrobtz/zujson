@@ -40,7 +40,7 @@
  *   c(<class>, "zujson_error", "error", "condition")
  * and does not return. Like Rf_error() it longjmps, so it must not be called
  * while a bare malloc'd pointer is live -- give the pointer to R first (see
- * zu_extptr_own_*). */
+ * zu_owner_*). */
 void zu_stop(const char *cls, const char *fmt, ...);
 
 /* The NDJSON line a record is being built from, or 0. While it is set,
@@ -56,12 +56,16 @@ size_t zu_utf8_cut(const char *s, size_t len, size_t max);
 
 /* ---- external pointers owning C memory across a longjmp (zu_cond.c) ---- */
 
-/* Each returns a protected-by-the-caller EXTPTRSXP with a finalizer that frees
- * the payload, so a condition signalled further down cannot leak it. Release
- * eagerly on the success path with zu_extptr_release(). */
-SEXP zu_extptr_own_doc(yyjson_doc *doc);
-SEXP zu_extptr_own_mut_doc(yyjson_mut_doc *doc);
-SEXP zu_extptr_own_buf(void *buf);
+/* Each returns an empty EXTPTRSXP, for the caller to protect, with a finalizer
+ * that frees whatever it comes to hold, so a condition signalled further down
+ * cannot leak it. Make the owner first, then allocate the resource, then
+ * zu_owner_hold() it on the very next line: zu_owner_hold() allocates nothing,
+ * so the resource is never bare across anything that can longjmp (#52).
+ * Release eagerly on the success path with zu_extptr_release(). */
+SEXP zu_owner_doc(void);
+SEXP zu_owner_mut_doc(void);
+SEXP zu_owner_buf(void);
+void zu_owner_hold(SEXP xp, void *p);
 void zu_extptr_release(SEXP xp);
 
 /* ---- .Call entry points ---- */
@@ -74,7 +78,8 @@ SEXP zujson_write(SEXP x_, SEXP pretty_,               /* zu_write.c */
                   SEXP auto_unbox_, SEXP as_raw_);
 SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_, SEXP df_);
 SEXP zujson_parse_ndjson_raw(SEXP x_, SEXP simplify_, SEXP df_);
-SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_);    /* zu_write.c */
+SEXP zujson_write_lines(SEXP x_, SEXP auto_unbox_,     /* zu_write.c */
+                        SEXP as_raw_);
 SEXP zujson_build_info(void);                          /* zu_info.c  */
 
 #endif /* ZUJSON_H */

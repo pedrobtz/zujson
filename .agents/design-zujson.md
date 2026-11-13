@@ -443,10 +443,16 @@ The single invariant, inherited from `zukomp` design §13:
 
 `zu_stop()`, `R_CheckUserInterrupt()` and every R allocator longjmp straight
 past a `free()`. So a `yyjson_doc`, a `yyjson_mut_doc` and yyjson's output
-buffer are each handed to a finalized external pointer (`zu_extptr_own_*`)
-*before* the first thing that can jump, and released eagerly on the success
-path. Finalizers clear the address first, which is what makes eager release and
-a later GC pass mutually safe.
+buffer are each owned by a finalized external pointer (`zu_owner_*`) made
+*before* the resource exists, and released eagerly on the success path. The
+order at every site is owner, then allocate, then `zu_owner_hold()`, which
+stores the address and allocates nothing, so the resource is never bare across
+anything that can jump. (Until 0.1.1 the owner was made after the resource, and
+its own three R allocations were the window: an allocation failure there
+leaked the document or the buffer. Fault injection measured 180–280 MB lost
+over a handful of calls; with the owner first it is zero.) Finalizers clear the
+address first, which is what makes eager release and a later GC pass mutually
+safe, and treat a still-empty owner as nothing to free.
 
 The corollary: nothing in the C layer needs a cleanup path on error, and
 `zu_stop()` can be called from anywhere in either recursion.

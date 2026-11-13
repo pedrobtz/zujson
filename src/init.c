@@ -10,7 +10,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"zujson_write",          (DL_FUNC) &zujson_write,          4},
     {"zujson_parse_ndjson_str", (DL_FUNC) &zujson_parse_ndjson_str, 3},
     {"zujson_parse_ndjson_raw", (DL_FUNC) &zujson_parse_ndjson_raw, 3},
-    {"zujson_write_lines",    (DL_FUNC) &zujson_write_lines,    2},
+    {"zujson_write_lines",    (DL_FUNC) &zujson_write_lines,    3},
     {"zujson_build_info",     (DL_FUNC) &zujson_build_info,     0},
     {NULL, NULL, 0}
 };

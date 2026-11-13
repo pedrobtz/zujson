@@ -15,9 +15,11 @@ behaviour changes, each listed in NEWS.md.
 These are the legs of the package's continuous integration, which runs
 `R CMD check --as-cran` on each:
 
-* GitHub Actions: macOS, Windows and Ubuntu, R release; Ubuntu, R oldrel-1
+* GitHub Actions: macOS, Windows and Ubuntu, R release; Windows, R-devel;
+  Ubuntu, R oldrel-1
 * R-hub containers on R-devel matching CRAN's Linux flavours: clang23 (clang
-  23, -std=gnu23), ubuntu-clang, ubuntu-gcc16, and the no-Suggests flavour
+  23, -std=gnu23), ubuntu-clang, ubuntu-gcc16, and the no-Suggests and
+  no-long-double (nold) flavours
 * local macOS (x86_64 build of R 4.6.2), R release
 
 ## Reverse dependencies

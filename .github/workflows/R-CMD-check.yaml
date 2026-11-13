@@ -20,10 +20,11 @@
 # README.md, which ships in the tarball, so a prose-only change is a real
 # change here.
 #
-# One input, nosuggests: the NOSUGGESTS flavour CRAN runs, with only hard
-# dependencies installed. It is what verifies the guard in tests/testthat.R
-# (#10); it runs in the full profile only. Otherwise the defaults are taken as
-# they ship, including the runners
+# Inputs: nosuggests, the NOSUGGESTS flavour CRAN runs with only hard
+# dependencies installed, which verifies the guard in tests/testthat.R (#10);
+# nold; and the runners with a Windows R-devel row. The extra flavours run in
+# the full profile only. Otherwise the defaults are taken as they ship,
+# including the containers
 # matrix with no R-devel Linux row. That row was in the old hand-rolled matrix
 # and is not missed -- the containers are R-devel on Linux already, on CRAN's
 # own compilers, and pinning R-devel to the runner's own GCC matches no CRAN
@@ -52,3 +53,14 @@ jobs:
     uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
     with:
       nosuggests: true
+      # CRAN's no-long-double flavour: the parse tests pin exact doubles, and
+      # the long double width is a real platform difference here (#82).
+      nold: true
+      # The shared default plus Windows R-devel, which nothing else checks
+      # (the containers cover R-devel on Linux only).
+      runners: >-
+        [{"os": "macos-latest", "r": "release"},
+         {"os": "windows-latest", "r": "release"},
+         {"os": "windows-latest", "r": "devel"},
+         {"os": "ubuntu-latest", "r": "release"},
+         {"os": "ubuntu-latest", "r": "oldrel-1"}]

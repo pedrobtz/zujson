@@ -1,6 +1,8 @@
 # zujson roadmap
 
-**Status:** proposed, 2026-11-13. Not yet accepted; see "Design amendments".
+**Status:** proposed, 2026-11-13.
+**Owner:** this package, with the design. Changing either is a pull request
+here; the RFC in `pedrobtz/packages` only points to them.
 **Covers:** 0.2.0 to 1.0.0, and what is left for after.
 **Does not cover:** 0.1.1, which is in flight under #17.
 
@@ -46,26 +48,25 @@ Ten sibling packages depend on the mapping. So:
    ProtoJSON, JOSE): zujson supplies the options those packages need, not the
    mapping itself.
 
-## Design amendments this roadmap needs
+## Design amendments made with this roadmap
 
-The design lists as non-goals "a `jsonlite` replacement, JSON Pointer, Patch,
-Schema, custom serializer dispatch". This roadmap plans Pointer, Patch and a
-narrow serializer hook, and leaves Schema to a separate package. That is a
-design change, and a design change goes through the RFC in
-`pedrobtz/packages/rfcs`, not through this file. Before Stage 1 of 0.2.0:
+The design listed as non-goals "a `jsonlite` replacement, JSON Pointer,
+Patch, Schema, custom serializer dispatch". This roadmap plans Pointer, Patch
+and a narrow serializer fallback, and leaves Schema to a separate package.
+The design is amended in the same pull request:
 
-- [ ] RFC: replace the non-goals line with the rule above, and add a §16
-      "Options" that records the option-growth pattern (Stage 2.2).
-- [ ] RFC: `lifecycle` joins the package's kinds at 0.3.0 (the stream) and
-      0.8.0 (the document). `.agents/assurance.md` gains an Objects table.
-- [ ] Design §14.9 and §15: `zuhttp` is on CRAN and imports
-      `zujson (>= 0.1.0)`. The C API and the stream are no longer blocked on
-      a caller. Strike "still blocked" in both places.
-- [ ] `CLAUDE.md`: link this file from "What this is", and move "what is
-      left" from design §15 to here.
+- [x] The non-goals line is replaced, and design §16 "Growth after v1"
+      records the rule above, the options pattern (Stage 2.2) and what moved.
+- [x] Design §13, §14.9 and §15: `zuhttp` is released and imports
+      `zujson (>= 0.1.0)`, so the stream and the C API are no longer blocked
+      on a caller. §15's list is closed and points here.
+- [x] `CLAUDE.md` links this file and says the package owns both documents.
+- [ ] `lifecycle` joins the package's kinds in `.agents/assurance.md`, with
+      an Objects table, in the pull request that exports the stream (Stage
+      3.1). Not before: CI checks that file against what exists.
 
-Stage sub-issues are opened when the roadmap is accepted, not before. The
-v0.2.0 parent is #60, and its six sub-issues are placed in stages below.
+Stage sub-issues are opened when this pull request merges. The v0.2.0 parent
+is #60, and its six sub-issues are placed in stages below.
 
 ## What the siblings need (evidence)
 
@@ -265,7 +266,8 @@ because ten entry points times thirty arguments is where routes drift apart.
 | every entry point accepts `options` | a test that lists the exports and fails on one that does not | `test-options.R` |
 <!-- markdownlint-enable MD013 -->
 
-**Exit.** Design §16 written. The two constructors exported with no fields
+**Exit.** Design §16 "Options" updated from "decided" to what was built.
+The two constructors exported with no fields
 beyond the ones 0.2.0 uses (Stage 2.3 adds none; they are empty shells with
 a tested contract).
 

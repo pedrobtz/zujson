@@ -848,6 +848,13 @@ static SEXP zu_finish(SEXP owner, yyjson_doc *doc, zu_mode mode, R_xlen_t df) {
  * shares this flag set, it would start calling those documents valid. */
 #define ZUJSON_READ_FLAGS (YYJSON_READ_ALLOW_BOM | YYJSON_READ_BIGNUM_AS_RAW)
 
+/* For a character `x` whose bytes are not valid in the encoding it declares:
+ * typically a body read with readLines() under the C locale. The raw route
+ * reads the bytes as the UTF-8 they are. */
+#define ZU_UNCONVERTIBLE \
+    "%s is not valid text in the encoding it declares, so it cannot be read " \
+    "as UTF-8 JSON; mark it with Encoding() or pass the bytes as a raw vector"
+
 static SEXP zu_read_mem(const char *dat, size_t len, zu_mode mode,
                         R_xlen_t df) {
     yyjson_read_err err;
@@ -870,9 +877,10 @@ SEXP zujson_parse_str(SEXP x_, SEXP simplify_, SEXP df_) {
     SEXP s = STRING_ELT(x_, 0);
     if (s == NA_STRING)
         zu_stop("zujson_parse_error", "`x` is NA, not JSON text");
-    /* translateCharUTF8 is a no-op for the common UTF-8/ASCII case and
-     * converts a latin1 or native-encoded string otherwise. */
-    const char *dat = Rf_translateCharUTF8(s);
+    /* A no-op for the common UTF-8/ASCII case; a checked conversion for a
+     * latin1 or native string otherwise, refused rather than rewritten (#42). */
+    const char *dat = zu_utf8(s);
+    if (!dat) zu_stop("zujson_parse_error", ZU_UNCONVERTIBLE, "`x`");
     return zu_read_mem(dat, strlen(dat), (zu_mode) Rf_asInteger(simplify_),
                        zu_df_arg(df_));
 }
@@ -881,28 +889,6 @@ SEXP zujson_parse_raw(SEXP x_, SEXP simplify_, SEXP df_) {
     zu_err_line = 0;
     return zu_read_mem((const char *) RAW(x_), (size_t) XLENGTH(x_),
                        (zu_mode) Rf_asInteger(simplify_), zu_df_arg(df_));
-}
-
-SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_) {
-    zu_err_line = 0;
-    const char *path = Rf_translateCharUTF8(STRING_ELT(path_, 0));
-    yyjson_read_err err;
-    SEXP owner = PROTECT(zu_owner_doc());
-    yyjson_doc *doc = yyjson_read_file(path, ZUJSON_READ_FLAGS, NULL, &err);
-    if (!doc) {
-        /* "could not open it" and "its contents are not JSON" are different
-         * problems with different fixes, so they get different classes. */
-        if (err.code == YYJSON_READ_ERROR_FILE_OPEN ||
-            err.code == YYJSON_READ_ERROR_FILE_READ)
-            zu_stop("zujson_io_error", "could not read '%s': %s", path, err.msg);
-        zu_stop("zujson_parse_error", "invalid JSON in '%s' at byte %lu: %s",
-                path, (unsigned long) err.pos, err.msg);
-    }
-    zu_owner_hold(owner, doc);
-    SEXP out = zu_finish(owner, doc, (zu_mode) Rf_asInteger(simplify_),
-                         zu_df_arg(df_));
-    UNPROTECT(1);
-    return out;
 }
 
 /* Validation parses and throws the tree away: yyjson has no cheaper
@@ -919,7 +905,9 @@ static SEXP zu_validate_mem(const char *dat, size_t len) {
 SEXP zujson_validate_str(SEXP x_) {
     SEXP s = STRING_ELT(x_, 0);
     if (s == NA_STRING) return Rf_ScalarLogical(FALSE);
-    const char *dat = Rf_translateCharUTF8(s);
+    /* Text that is not valid in its own encoding is not valid UTF-8 JSON. */
+    const char *dat = zu_utf8(s);
+    if (!dat) return Rf_ScalarLogical(FALSE);
     return zu_validate_mem(dat, strlen(dat));
 }
 
@@ -1026,7 +1014,8 @@ SEXP zujson_parse_ndjson_str(SEXP x_, SEXP simplify_, SEXP df_) {
     SEXP s = STRING_ELT(x_, 0);
     if (s == NA_STRING)
         zu_stop("zujson_parse_error", "`x` is NA, not NDJSON text");
-    const char *dat = Rf_translateCharUTF8(s);
+    const char *dat = zu_utf8(s);
+    if (!dat) zu_stop("zujson_parse_error", ZU_UNCONVERTIBLE, "`x`");
     return zu_read_ndjson(dat, strlen(dat), (zu_mode) Rf_asInteger(simplify_),
                           zu_df_arg(df_));
 }

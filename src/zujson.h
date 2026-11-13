@@ -54,6 +54,14 @@ extern unsigned long zu_err_line;
  * does not end inside a UTF-8 sequence: for quoting a key into a message. */
 size_t zu_utf8_cut(const char *s, size_t len, size_t max);
 
+/* A string's bytes as UTF-8, or NULL when they are not valid in the encoding
+ * the string declares. Rf_translateCharUTF8() never fails: it writes "<xx>"
+ * for a byte it cannot convert, which turned an unmarked "café" under the C
+ * locale into the ASCII text "caf<c3><a9>" in both directions (#42). Callers
+ * raise their own classed error on NULL. May allocate on the R_alloc stack, so
+ * wrap a loop in vmaxget()/vmaxset(); never call it on NA or CE_BYTES. */
+const char *zu_utf8(SEXP s);
+
 /* ---- external pointers owning C memory across a longjmp (zu_cond.c) ---- */
 
 /* Each returns an empty EXTPTRSXP, for the caller to protect, with a finalizer
@@ -71,7 +79,6 @@ void zu_extptr_release(SEXP xp);
 /* ---- .Call entry points ---- */
 SEXP zujson_parse_str(SEXP x_, SEXP simplify_, SEXP df_);   /* zu_parse.c */
 SEXP zujson_parse_raw(SEXP x_, SEXP simplify_, SEXP df_);   /* zu_parse.c */
-SEXP zujson_parse_file(SEXP path_, SEXP simplify_, SEXP df_); /* zu_parse.c */
 SEXP zujson_validate_str(SEXP x_);                     /* zu_parse.c */
 SEXP zujson_validate_raw(SEXP x_);                     /* zu_parse.c */
 SEXP zujson_write(SEXP x_, SEXP pretty_,               /* zu_write.c */

@@ -54,7 +54,9 @@ the same JSON as UTF-8 bytes, which is the form an HTTP request body wants.
 A vector or list becomes a JSON \strong{object} when every element is named, and
 an \strong{array} otherwise. Partial names would produce keys like \code{""}, which is
 valid JSON but almost never intended, so a partially named vector is written
-as an array and its names are dropped.
+as an array and its names are dropped. That includes a JSON object with an
+empty key, \code{{"":1}}: it parses to a list named \code{""}, which is written back
+as an array, \verb{[1]}.
 
 Data frames are written row-oriented, because that is what an HTTP API means
 by a table. To get the column-oriented form instead, strip the class first:
@@ -78,7 +80,9 @@ double would send \code{1} as \code{5e-324}. bit64 itself is not needed to write
 A string whose \code{Encoding()} is \code{"bytes"} also raises a \code{zujson_write_error}.
 That marking is R saying it does not know the encoding, and JSON text is
 UTF-8 by definition, so there is nothing to convert from. Every other
-encoding R tracks is converted on the way out.
+encoding R tracks is converted on the way out, and a string that is not
+valid in the encoding it declares raises \code{zujson_write_error} rather than
+being written with its bytes rewritten.
 
 Doubles are written compactly and always read back as the same number, so
 \code{0.1} is \code{0.1} rather than \code{0.10000000000000001}. A double that is a whole

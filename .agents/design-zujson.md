@@ -164,8 +164,13 @@ These were the questions left open in the earlier `jsx3` notes. v1's answers:
 
 1. **Default mode** — `preserve`, as above. `coerce` **is** implemented, as
    the new argument value this predicted: `simplify = "coerce"` promotes a
-   mixed-kind array to character following R's own rules, and `TRUE`/`FALSE`
-   stay exact synonyms for `"preserve"`/`"none"`. The default did not change.
+   mixed-kind array to character, and `TRUE`/`FALSE` stay exact synonyms for
+   `"preserve"`/`"none"`. The default did not change. The numbers are gathered
+   into one vector and formatted by `as.character()`, so the strings follow
+   `OutDec` and `scipen` and depend on the other numbers in the array
+   (`[100000,"a"]` → `"100000"`, `[100000,1.5,"a"]` → `"1e+05"`). That is
+   documented as it stands in 0.1.1; formatting each number from its own token
+   is #51, for 0.2.0, since it changes the strings this mode returns.
 2. **Logical as its own kind?** No: `[true,1]` is `integer`, because `TRUE -> 1`
    is lossless.
 3. **Empty array `[]`** — `logical(0)`.
@@ -347,6 +352,13 @@ repeated field, and it is a much rarer case than the scalar one.
 **Partial names produce an array, not empty keys.** `c(a=1, 2)` could be
 `{"a":1,"":2}`, which is valid JSON and essentially never intended. Dropping
 the names is the lesser surprise, and it is documented rather than silent.
+
+The rule also catches a key the parser produced: `{"":1}` parses to a list
+named `""` and writes back as `[1]`, so a body with an empty key does not
+survive a round trip, and `json_parse(data_frame = TRUE)` can build a frame
+with a column named `""` that `json_write()` refuses. It is the third
+documented asymmetry, pinned in `test-roundtrip.R`. Letting a name that came
+from JSON round-trip is #49, for 0.2.0.
 
 **Names on atomic vectors are honoured.** `jsonlite` drops them. Silently
 discarding data the caller attached is worse than the small asymmetry it

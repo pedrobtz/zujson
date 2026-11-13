@@ -10,12 +10,16 @@ test_that("structures survive a write/parse round trip unchanged", {
   expect_roundtrip(list(), simplify = FALSE)
 })
 
-test_that("the two documented asymmetries are the only ones", {
+test_that("the three documented asymmetries are the only ones", {
   # a JSON object is always a named list coming back, whatever went in
   expect_identical(json_parse(json_write(c(a = 1.5, b = 2.5))),
                    list(a = 1.5, b = 2.5))
   # an empty array simplifies to logical(0), not to list()
   expect_identical(json_parse(json_write(list())), logical())
+  # an empty key is a partial name to the writer, so the object comes back as
+  # an array (#49, deferred to 0.2.0)
+  expect_identical(json_write(json_parse('{"":1}')), "[1]")
+  expect_identical(json_write(json_parse('{"":1,"a":2}')), "[1,2]")
 })
 
 test_that("the response-body shape an HTTP client actually sees round-trips", {

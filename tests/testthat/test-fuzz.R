@@ -85,3 +85,52 @@ test_that("deeply nested input is rejected, not survived by luck", {
   ok <- paste0(strrep("[", 1000L), strrep("]", 1000L))
   expect_type(json_parse(ok), "list")
 })
+
+test_that("every read route gives the same value for the same bytes", {
+  # json_parse() on a string and on raw, json_parse_raw(), json_parse_file()
+  # and a one-line json_parse_ndjson() are five routes to one reader (#30).
+  # Valid documents from the round-trip generator, every mode, both
+  # data_frame settings; and for invalid input, the same condition class.
+  withr::local_seed(30L)
+  path <- withr::local_tempfile(fileext = ".json")
+  gen <- function(depth) {
+    if (depth > 3L) return(sample(list(1L, 2.5, TRUE, "s", NULL), 1L)[[1]])
+    switch(sample(3L, 1L),
+      sample(list(1L, -7L, 2.5, TRUE, "téxt", "", NULL), 1L)[[1]],
+      lapply(seq_len(sample(0:4, 1L)), function(i) gen(depth + 1L)),
+      {
+        n <- sample(1:4, 1L)
+        stats::setNames(lapply(seq_len(n), function(i) gen(depth + 1L)),
+                        paste0("k", seq_len(n)))
+      }
+    )
+  }
+  route <- function(f) tryCatch(f(), zujson_error = function(e) class(e)[1])
+  docs <- c(
+    vapply(seq_len(fuzz_iters(20L)), function(i) json_write(gen(1L)), ""),
+    '[{"a":1},{"a":2,"b":"x"}]', '﻿[1,2]', "[1,", '{"a":}', "1e400"
+  )
+  for (doc in docs) {
+    bytes <- charToRaw(enc2utf8(doc))
+    writeBin(bytes, path)
+    for (mode in c("preserve", "coerce", "none")) {
+      for (df in c(FALSE, TRUE)) {
+        want <- route(function() json_parse(doc, simplify = mode, data_frame = df))
+        got <- list(
+          raw = route(function() json_parse(bytes, simplify = mode, data_frame = df)),
+          parse_raw = route(function() json_parse_raw(bytes, simplify = mode,
+                                                      data_frame = df)),
+          file = route(function() json_parse_file(path, simplify = mode,
+                                                  data_frame = df)),
+          ndjson = route(function() {
+            r <- json_parse_ndjson(bytes, simplify = mode, data_frame = df)
+            if (length(r) == 1L) r[[1]] else r
+          })
+        )
+        expect_identical(got, list(raw = want, parse_raw = want, file = want,
+                                   ndjson = want),
+                         info = paste(mode, df, encodeString(doc)))
+      }
+    }
+  }
+})

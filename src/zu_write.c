@@ -98,7 +98,12 @@ static yyjson_mut_val *zu_w_str(zu_wctx *ctx, SEXP s) {
                 "a string is marked \"bytes\", an unknown encoding that "
                 "cannot be converted to the UTF-8 JSON requires");
     const void *vmax = vmaxget();
-    const char *u = Rf_translateCharUTF8(s);
+    const char *u = zu_utf8(s);
+    if (!u)
+        zu_stop("zujson_write_error",
+                "a string is not valid in the encoding it declares (%s), so it "
+                "cannot be converted to the UTF-8 JSON requires",
+                Rf_getCharCE(s) == CE_LATIN1 ? "latin1" : "the native one");
     yyjson_mut_val *v = yyjson_mut_strncpy(ctx->doc, u, strlen(u));
     vmaxset(vmax);
     return zu_ok(v);

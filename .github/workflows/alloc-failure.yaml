@@ -40,7 +40,7 @@ jobs:
       # injections of the first run landed in library(zujson) -- R's
       # find.package(), its regexes and gzfile() -- and none reached zujson.
       baseline-run: Rscript -e 'invisible(library(zujson))'
-      expect-pattern: "cannot allocate|memory exhausted|Out of memory|out of virtual memory|failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
+      expect-pattern: "[Cc]annot allocate|memory exhausted|Out of memory|out of virtual memory|failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
       target-pattern: "failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
       # R's own regex compiler and gzfile() crash on a failed allocation
       # themselves; a crash there is R's, not the package's.

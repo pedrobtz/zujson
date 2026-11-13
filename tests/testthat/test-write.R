@@ -327,7 +327,14 @@ test_that("POSIXct just below a day boundary floors to 23:59:59, never 24:00", {
     '"1969-12-31T23:59:59Z"'
   )
   expect_json(.POSIXct(-5e-324, tz = "UTC"), '"1969-12-31T23:59:59Z"')
-  for (k in c(-719527, -2, -1, 0, 1, 19675, 2932896)) {
+  # Near year 0 the expected text is written out: format() does not zero-pad
+  # years before 1000 on every platform ("0-01-02" on Linux), so it is the
+  # oracle only from year 1000 on.
+  expect_json(.POSIXct(-719527 * 86400 - 1e-3, tz = "UTC"),
+              '"0000-01-01T23:59:59Z"')
+  expect_json(.POSIXct(-719527 * 86400 - 0.5, tz = "UTC"),
+              '"0000-01-01T23:59:59Z"')
+  for (k in c(-354285, -2, -1, 0, 1, 19675, 2932896)) {
     for (eps in c(1e-12, 1e-9, 1e-6, 0.5)) {
       x <- .POSIXct(k * 86400 - eps, tz = "UTC")
       want <- format(

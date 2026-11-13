@@ -1,6 +1,6 @@
 # zujson roadmap
 
-**Status:** proposed, 2026-11-13.
+**Status:** accepted, 2026-11-13.
 **Owner:** this package, with the design. Changing either is a pull request
 here; the RFC in `pedrobtz/packages` only points to them.
 **Covers:** 0.2.0 to 1.0.0, and what is left for after.

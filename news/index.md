@@ -72,6 +72,32 @@
   that does not exist
   ([\#50](https://github.com/pedrobtz/zujson/issues/50)).
 
+- [`json_parse_file()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+  reads a FIFO or pipe, and a file named `stdin` or `clipboard` reads
+  the file rather than that device
+  ([\#66](https://github.com/pedrobtz/zujson/issues/66)).
+
+- Native-encoded strings in a UTF-8 session, the usual output of
+  [`rawToChar()`](https://rdrr.io/r/base/rawConversion.html) and
+  [`readLines()`](https://rdrr.io/r/base/readLines.html), are passed to
+  the parser and writer as they are rather than through a conversion,
+  which made
+  [`json_write()`](https://pedrobtz.github.io/zujson/reference/json_write.md)
+  about 8x slower on them
+  ([\#67](https://github.com/pedrobtz/zujson/issues/67)).
+
+- [`json_write_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md)
+  names the record an error comes from
+  ([\#70](https://github.com/pedrobtz/zujson/issues/70)).
+
+- A data frame with no columns and no `names` attribute is written as
+  `[]` rather than refused
+  ([\#73](https://github.com/pedrobtz/zujson/issues/73)).
+
+- A condition message that quotes a name holding invalid bytes stays
+  valid UTF-8, showing each bad byte as `<xx>`
+  ([\#76](https://github.com/pedrobtz/zujson/issues/76)).
+
 - The native memory behind a parse or a write can no longer leak if R
   fails an allocation at the moment it is handed to R. The external
   pointer that owns it is now made before the memory exists
@@ -109,8 +135,7 @@
   accepts a UTF-8 byte order mark only at the start of the body, and a
   body that is only a BOM is empty. A BOM at the start of any later line
   was accepted, and a BOM-only first line was an error
-  ([\#56](https://github.com/pedrobtz/zujson/issues/56)). \|\|\|\|\|\|\|
-  a962bb7
+  ([\#56](https://github.com/pedrobtz/zujson/issues/56)).
 
 ## zujson 0.1.0
 

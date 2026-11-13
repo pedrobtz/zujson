@@ -79,7 +79,7 @@ direction needs no conversion step.</p>
     <div class="section level2">
     <h2 id="type-mapping">Type mapping<a class="anchor" aria-label="anchor" href="#type-mapping"></a></h2>
 
-<table class="table table"><tr><td>R</td><td>JSON</td></tr><tr><td><code>NULL</code></td><td><code>null</code></td></tr><tr><td><code>NA</code>, <code>NaN</code>, <code>Inf</code></td><td><code>null</code></td></tr><tr><td><code>list(a = 1, b = 2)</code></td><td><code>{"a":1,"b":2}</code></td></tr><tr><td><code>list(1, 2)</code></td><td><code>[1,2]</code></td></tr><tr><td><code>c(a = 1, b = 2)</code></td><td><code>{"a":1,"b":2}</code></td></tr><tr><td><code>1:3</code></td><td><code>[1,2,3]</code></td></tr><tr><td><code>"a"</code></td><td><code>"a"</code> (see <code>auto_unbox</code>)</td></tr><tr><td><code>I("a")</code></td><td><code>["a"]</code></td></tr><tr><td><code>factor</code></td><td>its level, as a string</td></tr><tr><td><code>Date</code></td><td><code>"YYYY-MM-DD"</code></td></tr><tr><td><code>POSIXct</code></td><td><code>"YYYY-MM-DDTHH:MM:SSZ"</code>, in UTC</td></tr><tr><td><code>data.frame</code></td><td>array of one object per row</td></tr><tr><td><code><a href="https://rdrr.io/r/base/list.html" class="external-link">list()</a></code></td><td><code>[]</code></td></tr><tr><td><code>structure(list(), names = character())</code></td><td><code><a href="https://rdrr.io/r/base/Paren.html" class="external-link">{}</a></code></td></tr></table><p>A vector or list becomes a JSON <strong>object</strong> when every element is named, and
+<table class="table table"><tr><td>R</td><td>JSON</td></tr><tr><td><code>NULL</code></td><td><code>null</code></td></tr><tr><td><code>NA</code>, <code>NaN</code>, <code>Inf</code></td><td><code>null</code></td></tr><tr><td><code>list(a = 1, b = 2)</code></td><td><code>{"a":1,"b":2}</code></td></tr><tr><td><code>list(1, 2)</code></td><td><code>[1,2]</code></td></tr><tr><td><code>c(a = 1, b = 2)</code></td><td><code>{"a":1,"b":2}</code></td></tr><tr><td><code>1:3</code></td><td><code>[1,2,3]</code></td></tr><tr><td><code>"a"</code></td><td><code>"a"</code> (see <code>auto_unbox</code>)</td></tr><tr><td><code>I("a")</code></td><td><code>["a"]</code></td></tr><tr><td><code>factor</code></td><td>its level, as a string</td></tr><tr><td><code>Date</code></td><td><code>"YYYY-MM-DD"</code></td></tr><tr><td><code>POSIXct</code></td><td><code>"YYYY-MM-DDTHH:MM:SSZ"</code>, in UTC</td></tr><tr><td><code>bit64::integer64</code></td><td>the integers it holds</td></tr><tr><td><code>data.frame</code></td><td>array of one object per row</td></tr><tr><td><code><a href="https://rdrr.io/r/base/list.html" class="external-link">list()</a></code></td><td><code>[]</code></td></tr><tr><td><code>structure(list(), names = character())</code></td><td><code><a href="https://rdrr.io/r/base/Paren.html" class="external-link">{}</a></code></td></tr></table><p>A vector or list becomes a JSON <strong>object</strong> when every element is named, and
 an <strong>array</strong> otherwise. Partial names would produce keys like <code>""</code>, which is
 valid JSON but almost never intended, so a partially named vector is written
 as an array and its names are dropped.</p>
@@ -92,7 +92,13 @@ what its <code>tzone</code> says, since it is the same instant either way, and
 sub-second parts are dropped. Both are doubles in R and so reach much
 further than a timestamp can be written: outside <code>0000-01-01</code> to
 <code>9999-12-31</code>, the four-digit years ISO 8601 allows, they raise a
-<code>zujson_write_error</code> rather than print a year no API can parse.</p>
+<code>zujson_write_error</code> rather than print a year no API can parse. A <code>Date</code> or
+<code>POSIXct</code> that is all <code>NA</code> but stored as logical, which is how
+<code>structure(NA, class = "Date")</code> comes out, is written as <code>null</code>; one stored
+as anything else that is not a number raises <code>zujson_unsupported_type</code>.</p>
+<p>An <code>integer64</code> from bit64 is written as the 64-bit integers it holds, with
+its <code>NA</code> as <code>null</code>. Its values live in the bits of a double, so writing the
+double would send <code>1</code> as <code>5e-324</code>. bit64 itself is not needed to write one.</p>
 <p>A string whose <code><a href="https://rdrr.io/r/base/Encoding.html" class="external-link">Encoding()</a></code> is <code>"bytes"</code> also raises a <code>zujson_write_error</code>.
 That marking is R saying it does not know the encoding, and JSON text is
 UTF-8 by definition, so there is nothing to convert from. Every other
@@ -103,8 +109,11 @@ number is written without a decimal point at all — R has no integer literal,
 so <code>1</code> is a double, and <code>1.0</code> is rejected by a schema expecting an integer.</p>
 <p>Complex vectors, raw vectors, functions, environments and <code>POSIXlt</code> have no
 sensible JSON form and raise a <code>zujson_unsupported_type</code> error rather than
-being guessed at. (<code>POSIXlt</code> is a list of 11 broken-down time fields; convert
-it with <code><a href="https://rdrr.io/r/base/as.POSIXlt.html" class="external-link">as.POSIXct()</a></code> first.) A vector carrying an unrecognised class is
+being guessed at, wherever they appear: as a value, a list element, a data
+frame column or an NDJSON record. (<code>POSIXlt</code> is a list of 11 broken-down
+time fields; convert it with <code><a href="https://rdrr.io/r/base/as.POSIXlt.html" class="external-link">as.POSIXct()</a></code> first.) So does a classed
+vector whose storage the class cannot mean, such as a factor whose levels
+are not character. A vector carrying an unrecognised class is
 written as its underlying type, which for a matrix means its values in
 column-major order with <code>dim</code> dropped — matrices are not turned into nested
 arrays in this version.</p>

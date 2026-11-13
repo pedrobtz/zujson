@@ -2,6 +2,40 @@
 
 ## zujson (development version)
 
+### Bug fixes
+
+- A `POSIXlt` data frame column, and a `POSIXlt` passed to
+  [`json_write_ndjson()`](https://pedrobtz.github.io/zujson/reference/json_parse_ndjson.md),
+  now raise `zujson_unsupported_type`. Both used to skip the check and
+  write the 11 broken-down time fields as data: in an 11-row frame, row
+  *i* became field *i*
+  ([\#40](https://github.com/pedrobtz/zujson/issues/40)).
+
+- A `POSIXct` a fraction of a second before midnight is written as
+  `23:59:59`. Floating-point rounding could print hour `24` instead, as
+  in `"1969-12-31T24:00:00Z"`, which no RFC 3339 parser accepts
+  ([\#41](https://github.com/pedrobtz/zujson/issues/41)).
+
+- A classed vector whose storage the class cannot mean – a `Date` stored
+  as character, a factor with integer levels, a data frame that is not a
+  list of vector columns – raises `zujson_unsupported_type` instead of a
+  bare R error that escaped the `zujson_error` contract. An all-`NA`
+  logical `Date` or `POSIXct`, such as `structure(NA, class = "Date")`,
+  is written as `null`
+  ([\#43](https://github.com/pedrobtz/zujson/issues/43)).
+
+- A zero-row data frame is charged one nesting level, for the `[]` it
+  writes, not two. It used to be refused at a depth
+  [`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+  reads back ([\#57](https://github.com/pedrobtz/zujson/issues/57)).
+
+### Behaviour changes
+
+- `bit64::integer64` vectors are written as the 64-bit integers they
+  hold, with `NA` as `null`. They used to fall through to their storage
+  type and be written as the doubles their bits spell, so `1` went out
+  as `5e-324` ([\#48](https://github.com/pedrobtz/zujson/issues/48)).
+
 ## zujson 0.1.0
 
 CRAN release: 2026-10-02

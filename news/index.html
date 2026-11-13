@@ -36,6 +36,18 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="development version" id="zujson-development-version">zujson (development version)<a class="anchor" aria-label="anchor" href="#zujson-development-version"></a></h2>
+<div class="section level3">
+<h3 id="bug-fixes-development-version">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-development-version"></a></h3>
+<ul><li><p>A <code>POSIXlt</code> data frame column, and a <code>POSIXlt</code> passed to <code><a href="../reference/json_parse_ndjson.html">json_write_ndjson()</a></code>, now raise <code>zujson_unsupported_type</code>. Both used to skip the check and write the 11 broken-down time fields as data: in an 11-row frame, row <em>i</em> became field <em>i</em> (<a href="https://github.com/pedrobtz/zujson/issues/40" class="external-link">#40</a>).</p></li>
+<li><p>A <code>POSIXct</code> a fraction of a second before midnight is written as <code>23:59:59</code>. Floating-point rounding could print hour <code>24</code> instead, as in <code>"1969-12-31T24:00:00Z"</code>, which no RFC 3339 parser accepts (<a href="https://github.com/pedrobtz/zujson/issues/41" class="external-link">#41</a>).</p></li>
+<li><p>A classed vector whose storage the class cannot mean – a <code>Date</code> stored as character, a factor with integer levels, a data frame that is not a list of vector columns – raises <code>zujson_unsupported_type</code> instead of a bare R error that escaped the <code>zujson_error</code> contract. An all-<code>NA</code> logical <code>Date</code> or <code>POSIXct</code>, such as <code>structure(NA, class = "Date")</code>, is written as <code>null</code> (<a href="https://github.com/pedrobtz/zujson/issues/43" class="external-link">#43</a>).</p></li>
+<li><p>A zero-row data frame is charged one nesting level, for the <code>[]</code> it writes, not two. It used to be refused at a depth <code><a href="../reference/json_parse.html">json_parse()</a></code> reads back (<a href="https://github.com/pedrobtz/zujson/issues/57" class="external-link">#57</a>).</p></li>
+</ul></div>
+<div class="section level3">
+<h3 id="behaviour-changes-development-version">Behaviour changes<a class="anchor" aria-label="anchor" href="#behaviour-changes-development-version"></a></h3>
+<ul><li>
+<code>bit64::integer64</code> vectors are written as the 64-bit integers they hold, with <code>NA</code> as <code>null</code>. They used to fall through to their storage type and be written as the doubles their bits spell, so <code>1</code> went out as <code>5e-324</code> (<a href="https://github.com/pedrobtz/zujson/issues/48" class="external-link">#48</a>).</li>
+</ul></div>
 </div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.1.0" id="zujson-010">zujson 0.1.0<a class="anchor" aria-label="anchor" href="#zujson-010"></a></h2><p class="text-muted">CRAN release: 2026-10-02</p>

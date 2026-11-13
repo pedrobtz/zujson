@@ -1,0 +1,32 @@
+# Allocation-failure injection through r-actions' alloc-failure.yml: run
+# tools/alloc-exercise.R once per allocation, failing a different one each
+# time, so the paths where R longjmps while native memory is live are actually
+# executed (design §8; #26).
+#
+# The sweep restarts the interpreter once per allocation, so it is a scheduled
+# and on-demand job rather than a per-pull-request one. With no pull_request
+# trigger it needs no changes gate (ci.md).
+#
+# expect-pattern is R's own allocation error. A run that dies of an injected
+# failure any other way -- a crash, or the exerciser's "WRONG RESULT" -- does
+# not match, and fails the sweep.
+#
+# It does not detect leaks: a leaked yyjson document on the unwind path (#52)
+# exits like any other failed run. The sanitizer job's exerciser is where a
+# leak shows.
+on:
+  schedule:
+    - cron: "12 9 * * 0"
+  workflow_dispatch:
+
+name: alloc-failure
+
+permissions: read-all
+
+jobs:
+  alloc-failure:
+    uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@v1
+    with:
+      run: Rscript tools/alloc-exercise.R
+      expect-pattern: "cannot allocate|memory exhausted"
+      max-allocations: 1000

@@ -1,0 +1,23 @@
+# Holds .agents/assurance.md to the portfolio standard
+# (.claude/shared/assurance.md) through r-actions' assurance.yml.
+#
+# No `push:`: a pull request already checks its merge with main
+# (.claude/shared/ci.md, "Quick by default").
+on:
+  pull_request:
+  workflow_dispatch:
+
+name: assurance
+
+permissions:
+  contents: read
+
+jobs:
+  assurance:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:assurance'))
+    uses: pedrobtz/r-actions/.github/workflows/assurance.yml@v1

@@ -1,0 +1,45 @@
+.libPaths(c(file.path(Sys.getenv("W"), "lib"), .libPaths())); library(zujson)
+hostile <- nzchar(Sys.getenv("HOSTILE"))
+if (hostile) options(OutDec = ",", scipen = -5, digits = 3, warn = 2)
+out <- character()
+t <- function(label, expr) {
+  r <- tryCatch(expr, condition = function(e) paste0("<", paste(class(e), collapse="/"), "> ", conditionMessage(e)))
+  s <- if (is.character(r) && length(r)==1 && startsWith(r,"<")) r else paste(deparse(r, control=c("keepNA","keepInteger","niceNames","showAttributes","digits17")), collapse="")
+  out <<- c(out, sprintf("%-28s %s", label, s))
+}
+p <- json_parse
+u <- function(...) { x <- rawToChar(as.raw(c(...))); x }   # unmarked native bytes
+cafe_native <- u(0x63,0x61,0x66,0xc3,0xa9)
+cafe_utf8 <- cafe_native; Encoding(cafe_utf8) <- "UTF-8"
+cafe_l1 <- u(0x63,0x61,0x66,0xe9); Encoding(cafe_l1) <- "latin1"
+t("w dbl", json_write(c(1.5, 123456.789012345, 1e5, 1e-5, 0.1, 1e15, 1e22, 100000, 1234567.1)))
+t("w raw dbl", rawToChar(json_write_raw(c(1.5, 1e5))))
+t("w int", json_write(c(100000L, 123456789L)))
+t("w date", json_write(as.Date("2024-02-29"))); t("w posix", json_write(as.POSIXct("2024-02-29 12:34:56", tz="UTC"))); t("w posix local", json_write(as.POSIXct("2024-07-01 12:00:00"))); t("w posix NY", json_write(as.POSIXct("2024-07-01 12:00:00", tz="America/New_York")))
+t("w posix num", json_write(structure(1719835200, class=c("POSIXct","POSIXt"))))
+t("w posix lt->ct", json_write(as.POSIXct(as.POSIXlt("2024-07-01 12:00:00", tz="Asia/Kolkata"))))
+t("w factor df", json_write(data.frame(f=factor(c("b","a")), x=c(1.5,2), stringsAsFactors=TRUE)))
+t("w utf8", charToRaw(json_write(cafe_utf8))); t("w latin1", charToRaw(json_write(cafe_l1))); t("w native", charToRaw(json_write(cafe_native)))
+t("w raw utf8", json_write_raw(cafe_utf8)); t("w raw latin1", json_write_raw(cafe_l1)); t("w raw native", json_write_raw(cafe_native))
+t("w key utf8", json_write_raw(setNames(list(1), cafe_utf8))); t("w key latin1", json_write_raw(setNames(list(1), cafe_l1)))
+t("w ndjson utf8", charToRaw(json_write_ndjson(list(cafe_utf8)))); t("w ndjson raw utf8", json_write_ndjson_raw(list(cafe_utf8))); t("w ndjson latin1", json_write_ndjson_raw(list(cafe_l1)))
+t("w ndjson enc", Encoding(json_write_ndjson(list(cafe_utf8)))); t("w enc", Encoding(json_write(cafe_utf8)))
+t("w factor latin1 lvl", json_write_raw(factor(cafe_l1)))
+t("w df latin1 colname", json_write_raw(setNames(data.frame(1), cafe_l1)))
+ju <- paste0('["', cafe_utf8, '"]'); Encoding(ju) <- "UTF-8"
+jl <- u(0x5b,0x22,0x63,0x61,0x66,0xe9,0x22,0x5d); Encoding(jl) <- "latin1"
+jn <- u(0x5b,0x22,0x63,0x61,0x66,0xc3,0xa9,0x22,0x5d)
+t("p utf8 str", charToRaw(p(ju))); t("p latin1 str", charToRaw(p(jl))); t("p native str", charToRaw(p(jn))); t("p raw", charToRaw(p(charToRaw(jn))))
+t("v utf8", json_validate(ju)); t("v latin1", json_validate(jl)); t("v native", json_validate(jn)); t("v raw", json_validate(charToRaw(jn)))
+t("nd utf8", charToRaw(json_parse_ndjson(ju)[[1]])); t("nd latin1", charToRaw(json_parse_ndjson(jl)[[1]])); t("nd native", charToRaw(json_parse_ndjson(jn)[[1]]))
+t("p escaped", charToRaw(p('"caf\\u00e9"'))); t("p enc", Encoding(p('"caf\\u00e9"')))
+t("p nums", p('[1.5, 123456.789012345, 1e5, 1e-5, 0.1, 1e22]')); t("p 1e309", p("1e309")); t("p 1.5e400", p("[1.5e400, 1.5]")); t("p big", p("123456789012345678901234567890")); t("p 18446744073709551616.5", p("18446744073709551616.5")); t("p -1.5e400", p("-1.5e400"))
+t("coerce", p('[1.5,"a",100000,1e5,0.1,123456.789012345,true,1234567.1]', simplify="coerce"))
+t("coerce df", p('[{"a":1.5},{"a":"x"}]', simplify="coerce", data_frame=TRUE)$a)
+f <- file.path(tempdir(), "h.json"); writeBin(charToRaw('{"x":[1.5,2]}'), f); t("file", json_parse_file(f))
+t("rt dbl", identical(p(json_write(c(0.1, 1/3, 1e-320, 123456.789012345))), c(0.1, 1/3, 1e-320, 123456.789012345)))
+options(zujson.max_df_cells = 1234567.5); t("info opt", zujson_info()$max_df_cells); options(zujson.max_df_cells = NULL)
+t("info", zujson_info()[c("yyjson","max_depth","max_df_cells")])
+t("err msg date", tryCatch(json_write(as.Date("9999-12-31")+1.5), error=conditionMessage))
+t("err limit msg", {options(zujson.max_df_cells=1234567); r <- tryCatch(p(paste0("[", paste0('{"k', 1:1200, '":1}', collapse=","), "]"), data_frame=TRUE), error=conditionMessage); options(zujson.max_df_cells=NULL); r})
+writeLines(out, Sys.getenv("OUT"))

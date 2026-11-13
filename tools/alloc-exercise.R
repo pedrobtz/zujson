@@ -40,7 +40,11 @@ classed <- function(expr, cls, what) {
       "value"
     },
     zujson_error = function(e) {
-      if (grepl("failed to allocate memory|out of memory", conditionMessage(e))) {
+      # fixed matching: a regex would compile through TRE, which itself
+      # fails, or crashes, under an injected allocation failure
+      m <- conditionMessage(e)
+      if (grepl("failed to allocate memory", m, fixed = TRUE) ||
+          grepl("out of memory", m, fixed = TRUE)) {
         stop(e)
       }
       class(e)

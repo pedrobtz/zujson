@@ -35,7 +35,15 @@ jobs:
     uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@v1
     with:
       run: Rscript tools/alloc-exercise.R
-      expect-pattern: "cannot allocate|memory exhausted|failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
+      # The floor is measured with the package loaded, so the sweep starts
+      # where the workload does. Measured from an empty Rscript, all 1000
+      # injections of the first run landed in library(zujson) -- R's
+      # find.package(), its regexes and gzfile() -- and none reached zujson.
+      baseline-run: Rscript -e 'invisible(library(zujson))'
+      expect-pattern: "cannot allocate|memory exhausted|Out of memory|out of virtual memory|failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
       target-pattern: "failed to allocate memory|out of memory (building JSON|allocating a JSON document)"
+      # R's own regex compiler and gzfile() crash on a failed allocation
+      # themselves; a crash there is R's, not the package's.
+      ignore-crash-pattern: "tre_|gzfile\\(|regcomp|grepl\\(|gsub\\(|strsplit\\("
       min-target-hits: 1
       max-allocations: 1000

@@ -46,6 +46,11 @@ call to r-actions.
 | fuzz          | gap #28 |                    |
 | fuzz-reach    | gap #28 |                    |
 
+`alloc-failure` sweeps 1,000 allocations from a floor measured with the
+package loaded. Its first passing run (2026-11-13, run 43507381043) had 3 of the
+1,000 injected failures reach the package's own out-of-memory paths, with no
+crash and no wrong result; `min-target-hits: 1` fails a sweep that reaches none.
+
 `fuzz` is a gap even though `native-checks.yaml` has a `fuzz` job. That job
 drives `json_parse()` from R with random bytes and JSON-alphabet soup
 (`test-fuzz.R` at `ZUJSON_FUZZ=50000`). It is not coverage-guided, and its

@@ -77,6 +77,7 @@ One row per boundary the package crosses. An oracle knows the answer:
 | R doubles → JSON numbers                         | jsonlite reads back the identical double (pi, 1/3, 0.1, 1e-300, 2^53, `double.xmax`); whole doubles as exact integer text                                    | tests/testthat/test-interop-jsonlite.R; test-write.R                                   |
 | `Date` and `POSIXct` → ISO 8601 text | base R `format()` over 2,000 random days and 2,000 random instants in years 1000–9999; known answers at both range ends and around year 0 | tests/testthat/test-write.R |
 | R strings in other encodings → UTF-8 JSON | a latin1 and a UTF-8 spelling give identical bytes; text not valid in its declared encoding is a classed error in both directions, never `<xx>` | tests/testthat/test-write.R; test-parse.R |
+| Native strings → UTF-8, both directions | in a UTF-8 session, the same text marked UTF-8 gives identical values and bytes; in an ISO-8859-1 session the converted text equals the UTF-8 spelling; under C, a classed refusal | tests/testthat/test-parse.R; test-write.R |
 | Output under a hostile session | the same bytes under `LC_CTYPE=C`, a comma-decimal `LC_NUMERIC`, and `options(OutDec = ",", scipen = -5, digits = 3)` and `scipen = 100` | tests/testthat/test-session.R |
 | Data frame ↔ array of objects                    | jsonlite `fromJSON()` gives the same frame; NDJSON and `json_write()` write a row identically; round trip                                                   | tests/testthat/test-interop-jsonlite.R; test-ndjson.R; test-roundtrip.R                |
 | Data frame key index under adversarial keys | a timing differential: 2^14 keys colliding in unseeded FNV-1a against random keys of the same size | tests/testthat/test-parse.R "colliding keys do not make the data frame index quadratic" |
@@ -100,5 +101,6 @@ One row per limit the package enforces. "Straddled by" is the test of
 | int64 range for whole doubles on write | double value, [-2^63, 2^63) | tests/testthat/test-write.R (-2^63, the largest double below 2^63, 2^63, -2^63 - 2048) |
 | `Date` range on write                                    | days, 0000-01-01 to 9999-12-31                | tests/testthat/test-write.R (-719529, -719528, 2932896, 2932897)                                                               |
 | `POSIXct` range on write | seconds, 0000-01-01 to 9999-12-31 | tests/testthat/test-write.R (both ends, with fractions) |
+| `zu_read_file()` chunk (16 MiB per read) | bytes | tests/testthat/test-parse.R (files of 1, 7, 8, 9, 16, 17 and 33 bytes against a chunk of 8) |
 | `INT_MAX` bytes: a string value on parse, a document or NDJSON record on write | bytes                     | gap #37                                                                                                                      |
 <!-- markdownlint-enable MD013 -->

@@ -14,6 +14,7 @@
  * ------------------------------------------------------------------------- */
 
 unsigned long zu_err_line = 0;
+const char *zu_err_what = "line";
 
 size_t zu_utf8_cut(const char *s, size_t len, size_t max) {
     size_t n = len < max ? len : max;
@@ -52,6 +53,13 @@ const char *zu_utf8(SEXP s) {
     if (ce == CE_LATIN1)
         return zu_cp1252_undefined(c) ? NULL : Rf_translateCharUTF8(s);
 
+    /* Native text in a UTF-8 locale needs no conversion: R hands back the
+     * CHARSXP's own bytes, and yyjson validates them in both directions. Only
+     * a session in another charset goes on to the checked conversion. Sending
+     * this, the commonest input, through iconv as well made json_write() 8x
+     * slower and asked for 4x a parsed body in scratch memory (#67). */
+    if (Rf_translateCharUTF8(s) == c) return c;
+
     /* Native and not ASCII: convert from the locale's charset with a check,
      * through R's own iconv, which reports the byte it cannot convert rather
      * than substituting for it. The buffer comes first: R_alloc can longjmp,
@@ -71,6 +79,43 @@ const char *zu_utf8(SEXP s) {
     return buf;
 }
 
+/* The length of the valid UTF-8 sequence starting at p, or 0. Reads no
+ * further than the first byte that fails, so the string's NUL stops it. */
+static size_t zu_utf8_seq(const unsigned char *p) {
+    unsigned char c = p[0];
+    if (c < 0x80) return 1;
+    if (c >= 0xC2 && c <= 0xDF) return (p[1] & 0xC0) == 0x80 ? 2 : 0;
+    if (c >= 0xE0 && c <= 0xEF) {
+        if ((p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) return 0;
+        if ((c == 0xE0 && p[1] < 0xA0) || (c == 0xED && p[1] >= 0xA0)) return 0;
+        return 3;
+    }
+    if (c >= 0xF0 && c <= 0xF4) {
+        if ((p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80 ||
+            (p[3] & 0xC0) != 0x80) return 0;
+        if ((c == 0xF0 && p[1] < 0x90) || (c == 0xF4 && p[1] >= 0x90)) return 0;
+        return 4;
+    }
+    return 0;
+}
+
+const char *zu_msg_str(SEXP s) {
+    if (Rf_getCharCE(s) == CE_BYTES) return "<bytes>";
+    const unsigned char *t = (const unsigned char *) Rf_translateCharUTF8(s);
+    size_t n = strlen((const char *) t), i = 0, k;
+    for (i = 0; i < n; i += k)
+        if (!(k = zu_utf8_seq(t + i))) break;
+    if (i >= n) return (const char *) t;
+    char *out = R_alloc(4 * n + 1, 1), *o = out;
+    for (i = 0; i < n; ) {
+        k = zu_utf8_seq(t + i);
+        if (k) { memcpy(o, t + i, k); o += k; i += k; }
+        else   { snprintf(o, 5, "<%02x>", t[i]); o += 4; i++; }
+    }
+    *o = '\0';
+    return out;
+}
+
 /* The message is built from UTF-8 parts -- every key and name in it went
  * through translateCharUTF8() -- so it is marked UTF-8 rather than native,
  * and a cut at the buffer's end is moved back to a character boundary. Both
@@ -79,7 +124,7 @@ void zu_stop(const char *cls, const char *fmt, ...) {
     char msg[512];
     size_t off = 0;
     if (zu_err_line) {
-        int k = snprintf(msg, sizeof(msg), "line %lu: ", zu_err_line);
+        int k = snprintf(msg, sizeof(msg), "%s %lu: ", zu_err_what, zu_err_line);
         off = k > 0 ? (size_t) k : 0;
         zu_err_line = 0;
     }

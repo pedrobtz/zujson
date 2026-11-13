@@ -28,13 +28,23 @@ check <- function(got, want, what) {
   }
 }
 
+# Only the package's own condition classes are caught. An injected failure
+# that surfaces as R's allocation error, or as the package's own out-of-memory
+# condition, propagates and ends the run with that message, which the sweep's
+# patterns match; catching every error here reported it as "WRONG RESULT"
+# instead (#69, the check for #52).
 classed <- function(expr, cls, what) {
   got <- tryCatch(
     {
       force(expr)
       "value"
     },
-    error = function(e) class(e)
+    zujson_error = function(e) {
+      if (grepl("failed to allocate memory|out of memory", conditionMessage(e))) {
+        stop(e)
+      }
+      class(e)
+    }
   )
   if (!cls %in% got) stop("WRONG RESULT from ", what, call. = FALSE)
 }

@@ -91,6 +91,13 @@
   the body, and a body that is only a BOM is empty. A BOM at the start of any
   later line was accepted, and a BOM-only first line was an error (#56).
 
+## Documentation
+
+* `vignette("zujson")` is a Get started tutorial that takes one API
+  response through parsing, writing, raw bytes, a failure and NDJSON. The
+  website adds articles on malformed or untrusted input and on coming
+  from jsonlite.
+
 # zujson 0.1.0
 
 First release. Everything below is the work that went into it, newest first.

@@ -1,18 +1,30 @@
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
 # zujson
 
 <!-- badges: start -->
-[![CRAN status](https://www.r-pkg.org/badges/version/zujson)](https://CRAN.R-project.org/package=zujson)
-[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+
+[![CRAN
+status](https://www.r-pkg.org/badges/version/zujson)](https://CRAN.R-project.org/package=zujson)
+[![Lifecycle:
+experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml)
-[![native-checks](https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml)
 [![coverage](https://raw.githubusercontent.com/pedrobtz/zujson/gh-pages/badges/coverage.svg)](https://github.com/pedrobtz/zujson/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
-zujson converts between JSON and ordinary R vectors and lists, using vendored
-[yyjson](https://github.com/ibireme/yyjson) sources, so no system JSON library
-is required. It exists to serve `zuhttp`: parsing a response body and building a
-request body are the two things it is designed around, which makes it
-deliberately narrower than `jsonlite`, with a type mapping that is fully documented.
+zujson is a JSON parser and writer that converts between JSON and
+ordinary R vectors and lists by a small, documented type mapping.
+
+- It is built on [yyjson](https://github.com/ibireme/yyjson), whose
+  sources it bundles, so it needs no system library and no package
+  outside base R.
+- No value changes type to fit a vector: an array of numbers and strings
+  stays a list, unless you pass `simplify = "coerce"`.
+- It reads and writes raw bytes as well as strings, which is how an HTTP
+  body arrives and leaves.
+- Every failure is a condition that inherits from `zujson_error`, so one
+  handler catches them all.
 
 ## Installation
 
@@ -31,56 +43,53 @@ pak::pak("pedrobtz/zujson")
 
 ## Usage
 
-`json_parse()` turns JSON into R objects. An array becomes an atomic vector when
-its elements agree on a type, and a list when they do not — by default the type
-is never coerced away, though `simplify = "coerce"` opts into R's own promotion
-when you would rather have the vector.
-
 ``` r
 library(zujson)
-
-json_parse('{"ok": true, "ids": [1, 2, 3]}')
-#> $ok
-#> [1] TRUE
-#> 
-#> $ids
-#> [1] 1 2 3
 ```
 
-`json_write()` goes the other way. A fully named vector or list becomes an
-object, anything else becomes an array.
+`json_parse()` reads JSON into R. An object becomes a named list, and an
+array whose elements share a type becomes an atomic vector:
 
 ``` r
-json_write(list(query = "cats", limit = 10L))
-#> [1] "{\"query\":\"cats\",\"limit\":10}"
+str(json_parse('{"ok": true, "ids": [1, 2, 3], "next": null}'))
+#> List of 3
+#>  $ ok  : logi TRUE
+#>  $ ids : int [1:3] 1 2 3
+#>  $ next: NULL
 ```
 
-A response body arrives as raw bytes and a request body should leave as raw
-bytes, so both directions take and return them without a detour through a
-string:
+`json_write()` goes the other way. A fully named list becomes an object,
+a vector an array, and a length-one vector a bare value:
 
 ``` r
-json_write_raw(list(q = "cats"))
-#>  [1] 7b 22 71 22 3a 22 63 61 74 73 22 7d
-
-json_parse(json_write_raw(list(q = "cats")))
-#> $q
-#> [1] "cats"
+cat(json_write(list(query = "cats", limit = 10L, tags = c("a", "b"))))
+#> {"query":"cats","limit":10,"tags":["a","b"]}
 ```
 
-`json_parse_ndjson()` and `json_write_ndjson()` handle
-`application/x-ndjson`; `json_parse_file()`, `json_parse_raw()`,
-`json_validate()` and `json_write_ndjson_raw()` round out the set. The [getting
-started article](https://pedrobtz.github.io/zujson/articles/zujson.html) carries
-the full type mapping in both directions, the safety limits, and what the
-package deliberately does not do.
+zujson also reads files and NDJSON, builds data frames from arrays of
+records, and checks whether input is valid JSON; [Get
+started](https://pedrobtz.github.io/zujson/articles/zujson.html) shows
+each of these.
 
-## Testing
+## Learn more
 
-zujson's tests cover its type mapping, errors and round trips, and run on every
-pull request across five platform and R version combinations. Differential
-tests use `jsonlite` as an external oracle, while JSONTestSuite checks 95/95
-required acceptances and 188/188 required rejections. Sanitizer and fuzzing
-jobs exercise the C boundary and cleanup paths. See
-[Testing and conformance](https://pedrobtz.github.io/zujson/articles/testing.html)
-for the test map, full results and intentional divergences.
+- [Get started](https://pedrobtz.github.io/zujson/articles/zujson.html)
+  takes one response body through parsing, writing, raw bytes, errors
+  and NDJSON.
+- [Read a large API
+  document](https://pedrobtz.github.io/zujson/articles/kubernetes-openapi.html)
+  works through the 3.3 MB Kubernetes API specification.
+- [Handle malformed or untrusted
+  input](https://pedrobtz.github.io/zujson/articles/untrusted-input.html)
+  covers the condition classes and the limits that bound the work.
+- [Coming from
+  jsonlite](https://pedrobtz.github.io/zujson/articles/jsonlite.html)
+  lists where the two packages give different results, and why.
+- The
+  [reference](https://pedrobtz.github.io/zujson/reference/index.html)
+  has the full type mapping in both directions.
+
+zujson is narrower than
+[jsonlite](https://CRAN.R-project.org/package=jsonlite) by design; use
+jsonlite when you need matrices, custom serializers or input too large
+to hold in memory.

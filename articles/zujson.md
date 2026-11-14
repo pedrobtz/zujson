@@ -306,7 +306,7 @@ reports the build and the vendored yyjson version:
 
 zujson_info()
 #> $zujson
-#> [1] "0.1.0.9000"
+#> [1] "0.1.1"
 #> 
 #> $yyjson
 #> [1] "0.12.0"

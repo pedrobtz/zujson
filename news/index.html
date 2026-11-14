@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">zujson</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -35,9 +35,9 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="development version" id="zujson-development-version">zujson (development version)<a class="anchor" aria-label="anchor" href="#zujson-development-version"></a></h2>
+<h2 class="pkg-version" data-toc-text="0.1.1" id="zujson-011">zujson 0.1.1<a class="anchor" aria-label="anchor" href="#zujson-011"></a></h2>
 <div class="section level3">
-<h3 id="bug-fixes-development-version">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-development-version"></a></h3>
+<h3 id="bug-fixes-0-1-1">Bug fixes<a class="anchor" aria-label="anchor" href="#bug-fixes-0-1-1"></a></h3>
 <ul><li><p>A <code>POSIXlt</code> data frame column, and a <code>POSIXlt</code> passed to <code><a href="../reference/json_parse_ndjson.html">json_write_ndjson()</a></code>, now raise <code>zujson_unsupported_type</code>. Both used to skip the check and write the 11 broken-down time fields as data: in an 11-row frame, row <em>i</em> became field <em>i</em> (<a href="https://github.com/pedrobtz/zujson/issues/40" class="external-link">#40</a>).</p></li>
 <li><p>A <code>POSIXct</code> a fraction of a second before midnight is written as <code>23:59:59</code>. Floating-point rounding could print hour <code>24</code> instead, as in <code>"1969-12-31T24:00:00Z"</code>, which no RFC 3339 parser accepts (<a href="https://github.com/pedrobtz/zujson/issues/41" class="external-link">#41</a>).</p></li>
 <li><p>A classed vector whose storage the class cannot mean – a <code>Date</code> stored as character, a factor with integer levels, a data frame that is not a list of vector columns – raises <code>zujson_unsupported_type</code> instead of a bare R error that escaped the <code>zujson_error</code> contract. An all-<code>NA</code> logical <code>Date</code> or <code>POSIXct</code>, such as <code>structure(NA, class = "Date")</code>, is written as <code>null</code> (<a href="https://github.com/pedrobtz/zujson/issues/43" class="external-link">#43</a>).</p></li>
@@ -57,7 +57,7 @@
 <li><p>The native memory behind a parse or a write can no longer leak if R fails an allocation at the moment it is handed to R. The external pointer that owns it is now made before the memory exists (<a href="https://github.com/pedrobtz/zujson/issues/52" class="external-link">#52</a>).</p></li>
 </ul></div>
 <div class="section level3">
-<h3 id="behaviour-changes-development-version">Behaviour changes<a class="anchor" aria-label="anchor" href="#behaviour-changes-development-version"></a></h3>
+<h3 id="behaviour-changes-0-1-1">Behaviour changes<a class="anchor" aria-label="anchor" href="#behaviour-changes-0-1-1"></a></h3>
 <ul><li><p>A string that is not valid in the encoding it declares raises <code>zujson_parse_error</code> in <code><a href="../reference/json_parse.html">json_parse()</a></code> and <code><a href="../reference/json_parse_ndjson.html">json_parse_ndjson()</a></code>, and <code>zujson_write_error</code> in the writers, and <code><a href="../reference/json_validate.html">json_validate()</a></code> returns <code>FALSE</code> for it. R’s conversion used to rewrite such bytes as text, so a body read with <code><a href="https://rdrr.io/r/base/readLines.html" class="external-link">readLines()</a></code> under the C locale came back as <code>"caf&lt;c3&gt;&lt;a9&gt;"</code>, and <code>"&lt;81&gt;"</code> was sent for a latin1 byte with no character (<a href="https://github.com/pedrobtz/zujson/issues/42" class="external-link">#42</a>).</p></li>
 <li><p><code>bit64::integer64</code> vectors are written as the 64-bit integers they hold, with <code>NA</code> as <code>null</code>. They used to fall through to their storage type and be written as the doubles their bits spell, so <code>1</code> went out as <code>5e-324</code> (<a href="https://github.com/pedrobtz/zujson/issues/48" class="external-link">#48</a>).</p></li>
 <li><p>The data frame cell limit, <code>zujson_info()$max_df_cells</code>, now bounds the whole document rather than each frame in it, as <code><a href="../reference/json_parse.html">?json_parse</a></code> describes it. Many frames each under the limit used to be accepted together, however far past it their total went (<a href="https://github.com/pedrobtz/zujson/issues/45" class="external-link">#45</a>).</p></li>

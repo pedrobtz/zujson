@@ -362,7 +362,12 @@ test_that("json_parse_file() opens a non-ASCII path in any locale", {
   # under the C locale a readable file was "failed to read" (#50).
   dir <- withr::local_tempdir()
   path <- file.path(dir, "cé.json")
-  skip_if_not(file.create(path), "the file system refuses the name")
+  # Under a C locale file.create() cannot translate the name and raises an
+  # error rather than returning FALSE, so both outcomes mean skip.
+  skip_if_not(
+    isTRUE(tryCatch(file.create(path), error = function(e) FALSE)),
+    "the file system or locale refuses the name"
+  )
   writeBin(charToRaw('{"a":[1,2]}'), path)
   expect_identical(json_parse_file(path), list(a = 1:2))
   # The C locale is ASCII on Unix, which is the case this pins. Windows maps

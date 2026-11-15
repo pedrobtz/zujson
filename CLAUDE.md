@@ -5,16 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Shared conventions
 
-The portfolio's shared rules are synced into `.claude/shared/` from
-`pedrobtz/packages:claude/shared/`. Never edit them here. Where this file and
-a shared file disagree, this file wins for this package.
+<!-- r-skills: shared-rules -->
 
-@.claude/shared/workflow.md
-@.claude/shared/r-package.md
-@.claude/shared/ci.md
-@.claude/shared/native-code.md
-@.claude/shared/correctness.md
-@.claude/shared/assurance.md
+The portfolio's shared rules (`workflow`, `r-package`, `ci`, `native-code`,
+`correctness`, `assurance`) come from the
+[r-skills](https://github.com/pedrobtz/r-skills) plugin's `rules/`, loaded at
+session start because of the marker above. Never copy them here. Where this
+file and a shared rule disagree, this file wins for this package. Cloud
+sessions do not load the plugin and run without them.
 
 ## What this is
 
@@ -32,7 +30,7 @@ The specification is
 file. The plan is [.agents/roadmap.md](.agents/roadmap.md), versions 0.2.0 to
 1.0.0. **This package owns both.** The RFC in `pedrobtz/packages` is only a
 pointer to them, so a design or roadmap change is a pull request here, not
-an RFC (this overrides "One design" in `.claude/shared/workflow.md`). Design
+an RFC (this overrides "One design" in the shared `workflow.md` rules). Design
 §16 is the rule the roadmap grows by: the default mapping stops changing at
 0.2.0, and everything after is opt-in. Its numbered sections §1–§16: §5–§6 the type mappings and why they are
 what they are, §7 the error model, §8 the memory model, §9 depth limiting,
@@ -78,7 +76,7 @@ breaking change for all of them.
 
 ## Commands
 
-The everyday `devtools` commands are in `.claude/shared/r-package.md`. This
+The everyday `devtools` commands are in the shared `r-package.md` rules. This
 package checks with `cran = TRUE`, target 0 errors, 0 warnings, 0 notes:
 
 ```sh

@@ -1,9 +1,13 @@
-# The Kubernetes API spec in JSON
+# Read a large API document
 
-`zujson` exists to read HTTP response bodies, so the honest test is a
-real one. The Kubernetes OpenAPI specification is 3.3 MB of deeply
-nested JSON describing 476 endpoints and 635 object types — larger than
-almost any response an API will hand you, and far more irregular.
+This guide reads a large, irregular JSON document from a file and works
+with the result: the Kubernetes OpenAPI specification, 3.3 MB of deeply
+nested JSON describing 476 endpoints and 635 object types. It is for
+someone who has done
+[`vignette("zujson")`](https://pedrobtz.github.io/zujson/articles/zujson.md)
+and wants to see the same functions on a real document. The code is not
+run when the site is built, since it downloads the file; the output
+shown was captured from a run against the pinned release.
 
 The URL is pinned to a release tag rather than a branch, so the file —
 and therefore everything printed below — does not change under you.
@@ -179,3 +183,11 @@ result <- tryCatch(json_parse_file(path),
 [`json_validate()`](https://pedrobtz.github.io/zujson/reference/json_validate.md)
 answers the yes/no question without building anything, which is cheaper
 when all you need is to decide whether a body is worth parsing.
+
+## See also
+
+- [Handle malformed or untrusted
+  input](https://pedrobtz.github.io/zujson/articles/untrusted-input.md)
+  for the condition classes and limits in full.
+- [`?json_parse`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
+  for the `simplify` and `data_frame` arguments used here.

@@ -33,7 +33,16 @@
       <ul class="navbar-nav me-auto">
 <li class="nav-item"><a class="nav-link" href="articles/zujson.html">Get started</a></li>
 <li class="nav-item"><a class="nav-link" href="reference/index.html">Reference</a></li>
-<li class="nav-item"><a class="nav-link" href="articles/index.html">Articles</a></li>
+<li class="nav-item dropdown">
+  <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
+<li><a class="dropdown-item" href="articles/kubernetes-openapi.html">Read a large API document</a></li>
+    <li><a class="dropdown-item" href="articles/untrusted-input.html">Handle malformed or untrusted input</a></li>
+    <li><a class="dropdown-item" href="articles/jsonlite.html">Coming from jsonlite</a></li>
+    <li><hr class="dropdown-divider"></li>
+    <li><a class="dropdown-item" href="articles/index.html">More articles...</a></li>
+  </ul>
+</li>
 <li class="nav-item"><a class="nav-link" href="news/index.html">Changelog</a></li>
       </ul>
 <ul class="navbar-nav">
@@ -53,7 +62,13 @@
 </h1></div>
 <!-- badges: start -->
 
-<p>zujson converts between JSON and ordinary R vectors and lists, using vendored <a href="https://github.com/ibireme/yyjson" class="external-link">yyjson</a> sources, so no system JSON library is required. It exists to serve <code>zuhttp</code>: parsing a response body and building a request body are the two things it is designed around, which makes it deliberately narrower than <code>jsonlite</code>, with a type mapping that is fully documented.</p>
+<p>zujson is a JSON parser and writer that converts between JSON and ordinary R vectors and lists by a small, documented type mapping.</p>
+<ul>
+<li>It is built on <a href="https://github.com/ibireme/yyjson" class="external-link">yyjson</a>, whose sources it bundles, so it needs no system library and no package outside base R.</li>
+<li>No value changes type to fit a vector: an array of numbers and strings stays a list, unless you pass <code>simplify = "coerce"</code>.</li>
+<li>It reads and writes raw bytes as well as strings, which is how an HTTP body arrives and leaves.</li>
+<li>Every failure is a condition that inherits from <code>zujson_error</code>, so one handler catches them all.</li>
+</ul>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
@@ -68,34 +83,36 @@
 <div class="section level2">
 <h2 id="usage">Usage<a class="anchor" aria-label="anchor" href="#usage"></a>
 </h2>
-<p><code><a href="reference/json_parse.html">json_parse()</a></code> turns JSON into R objects. An array becomes an atomic vector when its elements agree on a type, and a list when they do not — by default the type is never coerced away, though <code>simplify = "coerce"</code> opts into R’s own promotion when you would rather have the vector.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a></span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="st">'{"ok": true, "ids": [1, 2, 3]}'</span><span class="op">)</span></span>
-<span><span class="co">#&gt; $ok</span></span>
-<span><span class="co">#&gt; [1] TRUE</span></span>
-<span><span class="co">#&gt; </span></span>
-<span><span class="co">#&gt; $ids</span></span>
-<span><span class="co">#&gt; [1] 1 2 3</span></span></code></pre></div>
-<p><code><a href="reference/json_write.html">json_write()</a></code> goes the other way. A fully named vector or list becomes an object, anything else becomes an array.</p>
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a></span><span class="op">)</span></span></code></pre></div>
+<p><code><a href="reference/json_parse.html">json_parse()</a></code> reads JSON into R. An object becomes a named list, and an array whose elements share a type becomes an atomic vector:</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="reference/json_write.html">json_write</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>query <span class="op">=</span> <span class="st">"cats"</span>, limit <span class="op">=</span> <span class="fl">10L</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] "{\"query\":\"cats\",\"limit\":10}"</span></span></code></pre></div>
-<p>A response body arrives as raw bytes and a request body should leave as raw bytes, so both directions take and return them without a detour through a string:</p>
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="st">'{"ok": true, "ids": [1, 2, 3], "next": null}'</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 3</span></span>
+<span><span class="co">#&gt;  $ ok  : logi TRUE</span></span>
+<span><span class="co">#&gt;  $ ids : int [1:3] 1 2 3</span></span>
+<span><span class="co">#&gt;  $ next: NULL</span></span></code></pre></div>
+<p><code><a href="reference/json_write.html">json_write()</a></code> goes the other way. A fully named list becomes an object, a vector an array, and a length-one vector a bare value:</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="reference/json_write.html">json_write_raw</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>q <span class="op">=</span> <span class="st">"cats"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;  [1] 7b 22 71 22 3a 22 63 61 74 73 22 7d</span></span>
-<span></span>
-<span><span class="fu"><a href="reference/json_parse.html">json_parse</a></span><span class="op">(</span><span class="fu"><a href="reference/json_write.html">json_write_raw</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>q <span class="op">=</span> <span class="st">"cats"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; $q</span></span>
-<span><span class="co">#&gt; [1] "cats"</span></span></code></pre></div>
-<p><code><a href="reference/json_parse_ndjson.html">json_parse_ndjson()</a></code> and <code><a href="reference/json_parse_ndjson.html">json_write_ndjson()</a></code> handle <code>application/x-ndjson</code>; <code><a href="reference/json_parse.html">json_parse_file()</a></code>, <code><a href="reference/json_parse.html">json_parse_raw()</a></code>, <code><a href="reference/json_validate.html">json_validate()</a></code> and <code><a href="reference/json_parse_ndjson.html">json_write_ndjson_raw()</a></code> round out the set. The <a href="https://pedrobtz.github.io/zujson/articles/zujson.html">getting started article</a> carries the full type mapping in both directions, the safety limits, and what the package deliberately does not do.</p>
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="reference/json_write.html">json_write</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>query <span class="op">=</span> <span class="st">"cats"</span>, limit <span class="op">=</span> <span class="fl">10L</span>, tags <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; {"query":"cats","limit":10,"tags":["a","b"]}</span></span></code></pre></div>
+<p>zujson also reads files and NDJSON, builds data frames from arrays of records, and checks whether input is valid JSON; <a href="https://pedrobtz.github.io/zujson/articles/zujson.html">Get started</a> shows each of these.</p>
 </div>
 <div class="section level2">
-<h2 id="testing">Testing<a class="anchor" aria-label="anchor" href="#testing"></a>
+<h2 id="learn-more">Learn more<a class="anchor" aria-label="anchor" href="#learn-more"></a>
 </h2>
-<p>zujson’s tests cover its type mapping, errors and round trips, and run on every pull request across five platform and R version combinations. Differential tests use <code>jsonlite</code> as an external oracle, while JSONTestSuite checks 95/95 required acceptances and 188/188 required rejections. Sanitizer and fuzzing jobs exercise the C boundary and cleanup paths. See <a href="https://pedrobtz.github.io/zujson/articles/testing.html">Testing and conformance</a> for the test map, full results and intentional divergences.</p>
+<ul>
+<li>
+<a href="https://pedrobtz.github.io/zujson/articles/zujson.html">Get started</a> takes one response body through parsing, writing, raw bytes, errors and NDJSON.</li>
+<li>
+<a href="https://pedrobtz.github.io/zujson/articles/kubernetes-openapi.html">Read a large API document</a> works through the 3.3 MB Kubernetes API specification.</li>
+<li>
+<a href="https://pedrobtz.github.io/zujson/articles/untrusted-input.html">Handle malformed or untrusted input</a> covers the condition classes and the limits that bound the work.</li>
+<li>
+<a href="https://pedrobtz.github.io/zujson/articles/jsonlite.html">Coming from jsonlite</a> lists where the two packages give different results, and why.</li>
+<li>The <a href="https://pedrobtz.github.io/zujson/reference/index.html">reference</a> has the full type mapping in both directions.</li>
+</ul>
+<p>zujson is narrower than <a href="https://CRAN.R-project.org/package=jsonlite" class="external-link">jsonlite</a> by design; use jsonlite when you need matrices, custom serializers or input too large to hold in memory.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">
@@ -137,7 +154,6 @@
 <li><a href="https://CRAN.R-project.org/package=zujson" class="external-link"><img src="https://www.r-pkg.org/badges/version/zujson" alt="CRAN status"></a></li>
 <li><a href="https://lifecycle.r-lib.org/articles/stages.html#experimental" class="external-link"><img src="https://img.shields.io/badge/lifecycle-experimental-orange.svg" alt="Lifecycle: experimental"></a></li>
 <li><a href="https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml" class="external-link"><img src="https://github.com/pedrobtz/zujson/actions/workflows/R-CMD-check.yaml/badge.svg" alt="R-CMD-check"></a></li>
-<li><a href="https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml" class="external-link"><img src="https://github.com/pedrobtz/zujson/actions/workflows/native-checks.yaml/badge.svg" alt="native-checks"></a></li>
 <li><a href="https://github.com/pedrobtz/zujson/actions/workflows/coverage.yaml" class="external-link"><img src="https://raw.githubusercontent.com/pedrobtz/zujson/gh-pages/badges/coverage.svg" alt="coverage"></a></li>
 </ul>
 </div>

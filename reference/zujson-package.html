@@ -17,7 +17,14 @@
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto"><li class="nav-item"><a class="nav-link" href="../articles/zujson.html">Get started</a></li>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
-<li class="nav-item"><a class="nav-link" href="../articles/index.html">Articles</a></li>
+<li class="nav-item dropdown">
+  <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/kubernetes-openapi.html">Read a large API document</a></li>
+    <li><a class="dropdown-item" href="../articles/untrusted-input.html">Handle malformed or untrusted input</a></li>
+    <li><a class="dropdown-item" href="../articles/jsonlite.html">Coming from jsonlite</a></li>
+    <li><hr class="dropdown-divider"></li>
+    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
+  </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
@@ -41,11 +48,27 @@
 
 
     <div class="section level2">
+    <h2 id="scope">Scope<a class="anchor" aria-label="anchor" href="#scope"></a></h2>
+
+
+<p>zujson is the JSON an HTTP client needs: one document, or one NDJSON body,
+in memory, to and from ordinary R vectors and lists. It leaves out, on
+purpose:</p><ul><li><p>matrix and N-d array simplification: a JSON array of arrays stays a list,
+and a matrix is written as its values in column-major order;</p></li>
+<li><p>incremental streaming of a document that does not fit in memory;</p></li>
+<li><p>JSON Pointer, JSON Patch and schema validation;</p></li>
+<li><p>custom serializers for classes the type mapping does not name.</p></li>
+</ul><p>Data frame reconstruction is opt-in, through <code>data_frame = TRUE</code>, so that
+the default mapping documented in <code><a href="json_parse.html">json_parse()</a></code> is what you get unless you
+ask for something else. Use jsonlite when you need one of the above.</p>
+    </div>
+    <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
-    <div class="dont-index"><p>Useful links:</p><ul><li><p><a href="https://github.com/pedrobtz/zujson" class="external-link">https://github.com/pedrobtz/zujson</a></p></li>
-<li><p><a href="https://pedrobtz.github.io/zujson/">https://pedrobtz.github.io/zujson/</a></p></li>
-<li><p>Report bugs at <a href="https://github.com/pedrobtz/zujson/issues" class="external-link">https://github.com/pedrobtz/zujson/issues</a></p></li>
-</ul></div>
+    <div class="dont-index"><p>The other packages of the <code>zu*</code> family:
+<a href="https://github.com/pedrobtz/zukomp" class="external-link">zukomp</a> for compression,
+<a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a> for XML,
+<a href="https://github.com/pedrobtz/zuyaml" class="external-link">zuyaml</a> for YAML, and zuhttp, the HTTP
+client that uses them.</p></div>
     </div>
     <div class="section level2">
     <h2 id="author">Author<a class="anchor" aria-label="anchor" href="#author"></a></h2>

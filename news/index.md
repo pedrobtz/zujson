@@ -137,6 +137,13 @@
   was accepted, and a BOM-only first line was an error
   ([\#56](https://github.com/pedrobtz/zujson/issues/56)).
 
+### Documentation
+
+- [`vignette("zujson")`](https://pedrobtz.github.io/zujson/articles/zujson.md)
+  is a Get started tutorial that takes one API response through parsing,
+  writing, raw bytes, a failure and NDJSON. The website adds articles on
+  malformed or untrusted input and on coming from jsonlite.
+
 ## zujson 0.1.0
 
 CRAN release: 2026-10-02

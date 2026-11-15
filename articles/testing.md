@@ -1,5 +1,10 @@
 # Testing and conformance
 
+This article is for someone deciding whether to trust zujson with input
+they do not control, or about to change its C code. It says how the
+package is checked and what it does with the JSON that conforming
+parsers disagree on.
+
 No single test can establish that a JSON library is correct. zujson uses
 five layers: focused package tests, the same suite across five platform
 and R version combinations, differential tests against `jsonlite`, the
@@ -88,44 +93,13 @@ arrays, nulls, scalars, number boundaries, UTF-8, escapes and surrogate
 pairs. The tests also verify that `jsonlite` accepts and reads every
 representative document emitted by zujson.
 
-### Parsing differences
-
-Four default parsing decisions differ:
-
-| JSON | zujson | jsonlite | Why zujson differs |
-|----|----|----|----|
-| `[]` | `logical(0)` | [`list()`](https://rdrr.io/r/base/list.html) | With no elements to establish a type, zujson keeps empty and populated arrays in the same atomic family. |
-| `[1, "a"]` | `list(1L, "a")` | `c("1", "a")` | The default preserves the original types instead of hiding a mixed-type field; `simplify = "coerce"` opts into the jsonlite result. |
-| `[{"a":1},{"b":2}]` | List of named lists | Data frame | Record reconstruction is explicit because it changes missing-value and column semantics; `data_frame = TRUE` opts in. |
-| `[[1,2],[3,4]]` | List of integer vectors | Matrix | JSON carries no matrix dimensions, so zujson does not infer them from a rectangular shape. |
-
-These are executable expectations, not incidental differences. The
-divergence table fails if either package starts returning the other
-result. The opt-in tests separately verify that `simplify = "coerce"`
-and `data_frame = TRUE` converge with `jsonlite` where intended.
-
-### Writing differences
-
-The writers have different goals:
-[`jsonlite::toJSON()`](https://jeroen.r-universe.dev/jsonlite/reference/fromJSON.html)
-is configurable and broad, while
-[`json_write()`](https://pedrobtz.github.io/zujson/reference/json_write.md)
-has a small mapping intended for HTTP bodies.
-
-| Decision | zujson | jsonlite default |
-|----|----|----|
-| Length-one atomic vector | Unboxed scalar | One-element array |
-| Named atomic vector | JSON object | Array with names dropped |
-| `NA`, `NaN` and infinity | `null` | Type-dependent strings or `null` |
-| Double precision | Shortest representation that round-trips exactly | Four decimal digits |
-| Matrix | Flat, column-major array | Nested row arrays |
-| Complex, raw and `POSIXlt` values | Structured unsupported-type error | Built-in specialized encodings |
-
-zujson also keeps parsing separate from I/O:
-[`json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.md)
-never treats a string as a file path or URL. Failures carry a specific
-condition class, and depth or embedded-NUL failures are reported instead
-of overflowing the C stack or returning a truncated string.
+The places where the two deliberately differ are executable expectations
+too. The divergence tests fail if either package starts returning the
+other’s result, and the opt-in tests separately verify that
+`simplify = "coerce"` and `data_frame = TRUE` converge with `jsonlite`
+where intended. [Coming from
+jsonlite](https://pedrobtz.github.io/zujson/articles/jsonlite.md) lists
+each difference with the reason for it.
 
 ## JSONTestSuite
 
@@ -177,6 +151,57 @@ Five numeric fixtures overflow to positive or negative infinity, two
 underflow to zero and three contain integers wider than `int64`. Once
 parsed, they are ordinary R doubles and participate in simplification
 like any other number.
+
+``` r
+
+json_parse("[123123e100000]")         # overflows: Inf, as as.numeric() gives
+#> [1] Inf
+json_parse("[123e-10000000]")         # underflows: 0
+#> [1] 0
+json_parse("[100000000000000000000]") # wider than int64: nearest double
+#> [1] 1e+20
+```
+
+Text is the opposite. Every string that comes back is marked as UTF-8,
+and that mark is only true because yyjson validated the bytes, so all 23
+rejections are text that is not valid UTF-8. A surrogate that is not
+half of a valid pair encodes no character:
+
+``` r
+
+json_validate('["\\ud800"]')        # lone high surrogate
+#> [1] FALSE
+json_validate('["\\uDd1e\\uD834"]') # a valid pair, inverted
+#> [1] FALSE
+json_validate('["\\ud83d\\ude02"]') # a correct pair
+#> [1] TRUE
+```
+
+Invalid byte sequences are truncated characters, overlong encodings,
+stray continuation bytes and Latin-1 text mislabelled as JSON. UTF-16 is
+refused with or without a byte order mark; convert it with
+[`iconv()`](https://rdrr.io/r/base/iconv.html) first.
+
+``` r
+
+json_validate(as.raw(c(0x22, 0xC0, 0xAF, 0x22))) # overlong encoding of "/"
+#> [1] FALSE
+json_validate(as.raw(c(0x22, 0xE9, 0x22)))       # Latin-1 e-acute
+#> [1] FALSE
+json_validate(as.raw(c(0xFF, 0xFE, 0x22, 0x00, 0x61, 0x00, 0x22, 0x00)))
+#> [1] FALSE
+```
+
+The two structural acceptances, 500 nested arrays and a UTF-8 byte order
+mark before the document:
+
+``` r
+
+json_validate(paste0(strrep("[", 500), strrep("]", 500)))
+#> [1] TRUE
+json_parse(as.raw(c(0xEF, 0xBB, 0xBF, 0x7B, 0x7D))) # BOM, then {}
+#> named list()
+```
 
 The suite also contains two valid strings with escaped NUL characters.
 [`json_validate()`](https://pedrobtz.github.io/zujson/reference/json_validate.md)
@@ -236,3 +261,12 @@ Finally, C changes are exercised with `gctorture(TRUE)`. It forces
 collections at allocation boundaries and is the most direct check that
 objects crossing the R/C boundary are protected for exactly as long as
 they are needed.
+
+## See also
+
+- [Handle malformed or untrusted
+  input](https://pedrobtz.github.io/zujson/articles/untrusted-input.md)
+  for what a caller does about the failures tested here.
+- [Coming from
+  jsonlite](https://pedrobtz.github.io/zujson/articles/jsonlite.md) for
+  the differences the differential tests pin.

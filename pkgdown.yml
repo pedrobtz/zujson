@@ -2,10 +2,12 @@ pandoc: 3.8.3
 pkgdown: 2.2.1
 pkgdown_sha: ~
 articles:
+  articles/jsonlite: jsonlite.html
   articles/kubernetes-openapi: kubernetes-openapi.html
   articles/testing: testing.html
-  articles/zujson: zujson.html
-last_built: 2026-11-14T16:59Z
+  articles/untrusted-input: untrusted-input.html
+  zujson: zujson.html
+last_built: 2026-11-15T06:14Z
 urls:
   reference: https://pedrobtz.github.io/zujson/reference
   article: https://pedrobtz.github.io/zujson/articles

@@ -17,7 +17,14 @@
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto"><li class="nav-item"><a class="nav-link" href="../articles/zujson.html">Get started</a></li>
 <li class="nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
-<li class="nav-item"><a class="nav-link" href="../articles/index.html">Articles</a></li>
+<li class="nav-item dropdown">
+  <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/kubernetes-openapi.html">Read a large API document</a></li>
+    <li><a class="dropdown-item" href="../articles/untrusted-input.html">Handle malformed or untrusted input</a></li>
+    <li><a class="dropdown-item" href="../articles/jsonlite.html">Coming from jsonlite</a></li>
+    <li><hr class="dropdown-divider"></li>
+    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
+  </ul></li>
 <li class="active nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
@@ -62,6 +69,11 @@
 <li><p><code>bit64::integer64</code> vectors are written as the 64-bit integers they hold, with <code>NA</code> as <code>null</code>. They used to fall through to their storage type and be written as the doubles their bits spell, so <code>1</code> went out as <code>5e-324</code> (<a href="https://github.com/pedrobtz/zujson/issues/48" class="external-link">#48</a>).</p></li>
 <li><p>The data frame cell limit, <code>zujson_info()$max_df_cells</code>, now bounds the whole document rather than each frame in it, as <code><a href="../reference/json_parse.html">?json_parse</a></code> describes it. Many frames each under the limit used to be accepted together, however far past it their total went (<a href="https://github.com/pedrobtz/zujson/issues/45" class="external-link">#45</a>).</p></li>
 <li><p><code><a href="../reference/json_parse_ndjson.html">json_parse_ndjson()</a></code> accepts a UTF-8 byte order mark only at the start of the body, and a body that is only a BOM is empty. A BOM at the start of any later line was accepted, and a BOM-only first line was an error (<a href="https://github.com/pedrobtz/zujson/issues/56" class="external-link">#56</a>).</p></li>
+</ul></div>
+<div class="section level3">
+<h3 id="documentation-0-1-1">Documentation<a class="anchor" aria-label="anchor" href="#documentation-0-1-1"></a></h3>
+<ul><li>
+<code><a href="../articles/zujson.html">vignette("zujson")</a></code> is a Get started tutorial that takes one API response through parsing, writing, raw bytes, a failure and NDJSON. The website adds articles on malformed or untrusted input and on coming from jsonlite.</li>
 </ul></div>
 </div>
     <div class="section level2">

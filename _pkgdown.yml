@@ -3,8 +3,12 @@ template:
   bootstrap: 5
 
 articles:
-- title: Articles
+- title: Guides
+  navbar: ~
   contents:
-  - articles/zujson
-  - articles/testing
   - articles/kubernetes-openapi
+  - articles/untrusted-input
+  - articles/jsonlite
+- title: Concepts
+  contents:
+  - articles/testing

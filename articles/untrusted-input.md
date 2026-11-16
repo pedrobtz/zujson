@@ -115,7 +115,7 @@ reports the two limits in force, with the package and yyjson versions:
 
 str(zujson_info())
 #> List of 4
-#>  $ zujson      : chr "0.1.1"
+#>  $ zujson      : chr "0.1.1.9000"
 #>  $ yyjson      : chr "0.12.0"
 #>  $ max_depth   : int 1000
 #>  $ max_df_cells: num 5e+07

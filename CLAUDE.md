@@ -442,3 +442,7 @@ There is no `src/vendor/PROVENANCE` and no checksum manifest yet, so
 Object files must never reach the tarball: `.Rbuildignore` excludes
 `src/**/*.o`, `*.o.tmp` and `*.so`/`*.dll`. A stale `.o` is otherwise shipped
 *and* relinked in preference to a fresh compile.
+- `cran-release.yaml` calls `cran-release.yml`, pinned to a commit (v1.43.0)
+  because it holds a write token. A push that changes `CRAN-SUBMISSION` tags
+  the submitted commit with the bare version, creates the GitHub release from
+  `NEWS.md` and opens the `.9000` bump pull request.
